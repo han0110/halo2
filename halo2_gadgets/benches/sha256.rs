@@ -85,7 +85,7 @@ fn bench(name: &str, k: u32, c: &mut Criterion) {
     // Initialize the polynomial commitment parameters
     let params_path = Path::new("./benches/sha256_assets/sha256_params");
     if File::open(&params_path).is_err() {
-        let params: ParamsIPA<EqAffine> = ParamsIPA::new(k);
+        let params: ParamsIPA<EqAffine> = ParamsIPA::new(k, OsRng);
         let mut buf = Vec::new();
 
         params.write(&mut buf).expect("Failed to write params");

@@ -15,6 +15,7 @@ use ff::{Field, PrimeField};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
+use rand_core::RngCore;
 
 mod prover;
 mod verifier;
@@ -48,8 +49,8 @@ impl<C: CurveAffine> CommitmentScheme for IPACommitmentScheme<C> {
     type ParamsProver = ParamsIPA<C>;
     type ParamsVerifier = ParamsVerifierIPA<C>;
 
-    fn new_params(k: u32) -> Self::ParamsProver {
-        ParamsIPA::new(k)
+    fn new_params<R: RngCore>(k: u32, rng: R) -> Self::ParamsProver {
+        ParamsIPA::new(k, rng)
     }
 
     fn read_params<R: io::Read>(reader: &mut R) -> io::Result<Self::ParamsProver> {
@@ -146,7 +147,7 @@ impl<'params, C: CurveAffine> ParamsProver<'params, C> for ParamsIPA<C> {
 
     /// Initializes parameters for the curve, given a random oracle to draw
     /// points from.
-    fn new(k: u32) -> Self {
+    fn new<R: RngCore>(k: u32, _: R) -> Self {
         // This is usually a limitation on the curve, but we also want 32-bit
         // architectures to be supported.
         assert!(k < 32);
@@ -274,7 +275,7 @@ mod test {
         use crate::poly::EvaluationDomain;
         use halo2curves::pasta::{EpAffine, Fq};
 
-        let params = ParamsIPA::<EpAffine>::new(K);
+        let params = ParamsIPA::<EpAffine>::new(K, OsRng);
         let domain = EvaluationDomain::new(1, K);
 
         let mut a = domain.empty_lagrange();
@@ -299,7 +300,7 @@ mod test {
         use crate::poly::EvaluationDomain;
         use halo2curves::pasta::{EqAffine, Fp};
 
-        let params: ParamsIPA<EqAffine> = ParamsIPA::<EqAffine>::new(K);
+        let params: ParamsIPA<EqAffine> = ParamsIPA::<EqAffine>::new(K, OsRng);
         let domain = EvaluationDomain::new(1, K);
 
         let mut a = domain.empty_lagrange();
@@ -335,7 +336,7 @@ mod test {
 
         let rng = OsRng;
 
-        let params = ParamsIPA::<EpAffine>::new(K);
+        let params = ParamsIPA::<EpAffine>::new(K, OsRng);
         let mut params_buffer = vec![];
         <ParamsIPA<_> as Params<_>>::write(&params, &mut params_buffer).unwrap();
         let params: ParamsIPA<EpAffine> = Params::read::<_>(&mut &params_buffer[..]).unwrap();

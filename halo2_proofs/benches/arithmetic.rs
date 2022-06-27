@@ -16,7 +16,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // small multiexp
     {
-        let params: ParamsIPA<EqAffine> = ParamsIPA::new(5);
+        let params: ParamsIPA<EqAffine> = ParamsIPA::new(5, rng);
         let g = &mut params.get_g();
         let len = g.len() / 2;
         let (g_lo, g_hi) = g.split_at_mut(len);

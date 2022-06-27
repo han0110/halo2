@@ -16,8 +16,8 @@ use halo2curves::pairing::Engine;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
-
 use std::io;
+use rand_core::RngCore;
 
 use super::msm::MSMKZG;
 
@@ -45,8 +45,8 @@ impl<E: Engine + Debug> CommitmentScheme for KZGCommitmentScheme<E> {
     type ParamsProver = ParamsKZG<E>;
     type ParamsVerifier = ParamsVerifierKZG<E>;
 
-    fn new_params(k: u32) -> Self::ParamsProver {
-        ParamsKZG::new(k)
+    fn new_params<R: RngCore>(k: u32, rng: R) -> Self::ParamsProver {
+        ParamsKZG::new(k, rng)
     }
 
     fn read_params<R: io::Read>(reader: &mut R) -> io::Result<Self::ParamsProver> {
@@ -180,7 +180,7 @@ impl<'params, E: Engine + Debug> ParamsProver<'params, E::G1Affine> for ParamsKZ
         self
     }
 
-    fn new(k: u32) -> Self {
+    fn new<R: RngCore>(k: u32, rng: R) -> Self {
         // Largest root of unity exponent of the Engine is `2^E::Scalar::S`, so we can
         // only support FFTs of polynomials below degree `2^E::Scalar::S`.
         assert!(k <= E::Scalar::S);
@@ -188,8 +188,7 @@ impl<'params, E: Engine + Debug> ParamsProver<'params, E::G1Affine> for ParamsKZ
 
         // Calculate g = [G1, [s] G1, [s^2] G1, ..., [s^(n-1)] G1] in parallel.
         let g1 = E::G1Affine::generator();
-        use rand_core::OsRng;
-        let s = <E::Scalar>::random(OsRng);
+        let s = <E::Scalar>::random(rng);
 
         let mut g_projective = vec![E::G1::group_zero(); n as usize];
         parallelize(&mut g_projective, |g, start| {
@@ -296,7 +295,7 @@ mod test {
         use crate::poly::EvaluationDomain;
         use halo2curves::bn256::{Bn256, Fr};
 
-        let params = ParamsKZG::<Bn256>::new(K);
+        let params = ParamsKZG::<Bn256>::new(K, OsRng);
         let domain = EvaluationDomain::new(1, K);
 
         let mut a = domain.empty_lagrange();
@@ -324,7 +323,7 @@ mod test {
         use crate::halo2curves::bn256::{Bn256, Fr};
         use crate::poly::EvaluationDomain;
 
-        let params0 = ParamsKZG::<Bn256>::new(K);
+        let params0 = ParamsKZG::<Bn256>::new(K, OsRng);
         let mut data = vec![];
         <ParamsKZG<_> as Params<_>>::write(&params0, &mut data).unwrap();
         let params1: ParamsKZG<Bn256> = Params::read::<_>(&mut &data[..]).unwrap();

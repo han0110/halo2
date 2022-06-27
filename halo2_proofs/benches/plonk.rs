@@ -262,7 +262,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     fn keygen(k: u32) -> (ParamsIPA<EqAffine>, ProvingKey<EqAffine>) {
         use halo2_proofs::poly::commitment::ParamsProver;
-        let params: ParamsIPA<EqAffine> = ParamsIPA::new(k);
+        let params: ParamsIPA<EqAffine> = ParamsIPA::new(k, OsRng);
         let empty_circuit: MyCircuit<Fp> = MyCircuit {
             a: Value::unknown(),
             k,

@@ -233,13 +233,14 @@ mod tests {
         pasta::{Ep, EpAffine, Fp, Fq},
         CurveAffine,
     };
+    use rand_core::OsRng;
 
     #[test]
     fn msm_arithmetic() {
         let base: Ep = EpAffine::from_xy(-Fp::one(), Fp::from(2)).unwrap().into();
         let base_viol = base + base;
 
-        let params = ParamsIPA::new(4);
+        let params = ParamsIPA::new(4, OsRng);
         let mut a: MSMIPA<EpAffine> = MSMIPA::new(&params);
         a.append_term(Fq::one(), base);
         // a = [1] P

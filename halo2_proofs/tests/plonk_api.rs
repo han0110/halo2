@@ -437,7 +437,7 @@ fn plonk_api() {
 
             // Check that we get an error if we try to initialize the proving key with a value of
             // k that is too small for the minimum required number of rows.
-            let much_too_small_params= <$scheme as CommitmentScheme>::ParamsProver::new(1);
+            let much_too_small_params= <$scheme as CommitmentScheme>::ParamsProver::new(1, OsRng);
             assert_matches!(
                 keygen_vk::<$scheme, _, ZK>(&much_too_small_params, &empty_circuit),
                 Err(Error::NotEnoughRowsAvailable {
@@ -447,7 +447,7 @@ fn plonk_api() {
 
             // Check that we get an error if we try to initialize the proving key with a value of
             // k that is too small for the number of rows the circuit uses.
-            let slightly_too_small_params = <$scheme as CommitmentScheme>::ParamsProver::new(K-1);
+            let slightly_too_small_params = <$scheme as CommitmentScheme>::ParamsProver::new(K-1, OsRng);
             assert_matches!(
                 keygen_vk::<$scheme, _, ZK>(&slightly_too_small_params, &empty_circuit),
                 Err(Error::NotEnoughRowsAvailable {
@@ -562,7 +562,7 @@ fn plonk_api() {
         type Scheme = KZGCommitmentScheme<Bn256>;
         bad_keys!(Scheme);
 
-        let params = ParamsKZG::<Bn256>::new(K);
+        let params = ParamsKZG::<Bn256>::new(K, OsRng);
         let rng = OsRng;
 
         let pk = keygen::<KZGCommitmentScheme<_>, ZK>(&params);
@@ -592,7 +592,7 @@ fn plonk_api() {
         type Scheme = KZGCommitmentScheme<Bn256>;
         bad_keys!(Scheme);
 
-        let params = ParamsKZG::<Bn256>::new(K);
+        let params = ParamsKZG::<Bn256>::new(K, OsRng);
         let rng = OsRng;
 
         let pk = keygen::<KZGCommitmentScheme<_>, ZK>(&params);
@@ -623,7 +623,7 @@ fn plonk_api() {
         type Scheme = IPACommitmentScheme<EqAffine>;
         bad_keys!(Scheme);
 
-        let params = ParamsIPA::<EqAffine>::new(K);
+        let params = ParamsIPA::<EqAffine>::new(K, OsRng);
         let rng = OsRng;
 
         let pk = keygen::<IPACommitmentScheme<EqAffine>, ZK>(&params);
