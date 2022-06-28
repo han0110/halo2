@@ -13,9 +13,9 @@ use crate::poly::{Coeff, LagrangeCoeff, Polynomial};
 
 use ff::{Field, PrimeField};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
+use rand_core::RngCore;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
-use rand_core::RngCore;
 
 mod prover;
 mod verifier;

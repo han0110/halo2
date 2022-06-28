@@ -583,7 +583,7 @@ pub mod tests {
                                     offset: 1,
                                 },
                                 cell_values: vec![(
-                                    ((Any::Advice, 5).into(), 0).into(),
+                                    ((Any::advice(), 5).into(), 0).into(),
                                     format_value(*magnitude_error),
                                 )],
                             },
@@ -592,7 +592,7 @@ pub mod tests {
                                 location: FailureLocation::OutsideRegion { row: 0 },
                             },
                             VerifyFailure::Permutation {
-                                column: (Any::Advice, 4).into(),
+                                column: (Any::advice(), 4).into(),
                                 location: FailureLocation::InRegion {
                                     region: (2, "Short fixed-base mul (incomplete addition)")
                                         .into(),
@@ -634,7 +634,7 @@ pub mod tests {
                             region: (3, "Short fixed-base mul (most significant word)").into(),
                             offset: 1,
                         },
-                        cell_values: vec![(((Any::Advice, 4).into(), 0).into(), "0".to_string())],
+                        cell_values: vec![(((Any::advice(), 4).into(), 0).into(), "0".to_string())],
                     },
                     VerifyFailure::ConstraintNotSatisfied {
                         constraint: (
@@ -649,14 +649,14 @@ pub mod tests {
                         },
                         cell_values: vec![
                             (
-                                ((Any::Advice, 1).into(), 0).into(),
+                                ((Any::advice(), 1).into(), 0).into(),
                                 format_value(negation_check_y),
                             ),
                             (
-                                ((Any::Advice, 3).into(), 0).into(),
+                                ((Any::advice(), 3).into(), 0).into(),
                                 format_value(negation_check_y),
                             ),
-                            (((Any::Advice, 4).into(), 0).into(), "0".to_string()),
+                            (((Any::advice(), 4).into(), 0).into(), "0".to_string()),
                         ],
                     }
                 ])

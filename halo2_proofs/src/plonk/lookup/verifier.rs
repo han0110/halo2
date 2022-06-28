@@ -103,6 +103,7 @@ impl<C: CurveAffine> Evaluated<C> {
         advice_evals: &[C::Scalar],
         fixed_evals: &[C::Scalar],
         instance_evals: &[C::Scalar],
+        challenges: &[C::Scalar],
     ) -> impl Iterator<Item = C::Scalar> + 'a {
         let active_rows = C::Scalar::one() - (l_last + l_blind);
 
@@ -123,6 +124,7 @@ impl<C: CurveAffine> Evaluated<C> {
                             &|query| fixed_evals[query.index],
                             &|query| advice_evals[query.index],
                             &|query| instance_evals[query.index],
+                            &|challenge| challenges[challenge.index()],
                             &|a| -a,
                             &|a, b| a + &b,
                             &|a, b| a * &b,

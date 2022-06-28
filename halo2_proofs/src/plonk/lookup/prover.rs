@@ -79,6 +79,7 @@ impl<F: FieldExt> Argument<F> {
         advice_values: &'a [Polynomial<Scheme::Scalar, LagrangeCoeff>],
         fixed_values: &'a [Polynomial<Scheme::Scalar, LagrangeCoeff>],
         instance_values: &'a [Polynomial<Scheme::Scalar, LagrangeCoeff>],
+        challenges: &'a [Scheme::Scalar],
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Permuted<Scheme::Curve>, Error> {
@@ -94,6 +95,7 @@ impl<F: FieldExt> Argument<F> {
                         fixed_values,
                         advice_values,
                         instance_values,
+                        challenges,
                     ))
                 })
                 .fold(domain.empty_lagrange(), |acc, expression| {

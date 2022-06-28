@@ -13,11 +13,11 @@ use crate::poly::{Coeff, LagrangeCoeff, Polynomial};
 use ff::{Field, PrimeField};
 use group::{prime::PrimeCurveAffine, Curve, Group as _};
 use halo2curves::pairing::Engine;
+use rand_core::RngCore;
 use std::fmt::Debug;
+use std::io;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
-use std::io;
-use rand_core::RngCore;
 
 use super::msm::MSMKZG;
 
