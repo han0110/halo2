@@ -99,7 +99,7 @@ impl<F: FieldExt + PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, K> 
         };
 
         // https://p.z.cash/halo2-0.1:decompose-combined-lookup
-        meta.lookup(|meta| {
+        meta.lookup("lookup", |meta| {
             let q_lookup = meta.query_selector(config.q_lookup);
             let q_running = meta.query_selector(config.q_running);
             let z_cur = meta.query_advice(config.running_sum, Rotation::cur());
@@ -585,6 +585,7 @@ mod tests {
             assert_eq!(
                 prover.verify(),
                 Err(vec![VerifyFailure::Lookup {
+                    name: "lookup",
                     lookup_index: 0,
                     location: FailureLocation::InRegion {
                         region: (1, "Range check 6 bits").into(),
@@ -605,6 +606,7 @@ mod tests {
                 prover.verify(),
                 Err(vec![
                     VerifyFailure::Lookup {
+                        name: "lookup",
                         lookup_index: 0,
                         location: FailureLocation::InRegion {
                             region: (1, "Range check 6 bits").into(),
@@ -612,6 +614,7 @@ mod tests {
                         },
                     },
                     VerifyFailure::Lookup {
+                        name: "lookup",
                         lookup_index: 0,
                         location: FailureLocation::InRegion {
                             region: (1, "Range check 6 bits").into(),
@@ -641,6 +644,7 @@ mod tests {
             assert_eq!(
                 prover.verify(),
                 Err(vec![VerifyFailure::Lookup {
+                    name: "lookup",
                     lookup_index: 0,
                     location: FailureLocation::InRegion {
                         region: (1, "Range check 6 bits").into(),
