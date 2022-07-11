@@ -89,7 +89,7 @@ impl<C: CurveAffine> BatchVerifier<C> {
     /// This uses [`OsRng`] internally instead of taking an `R: RngCore` argument, because
     /// the internal parallelization requires access to a RNG that is guaranteed to not
     /// clone its internal state when shared between threads.
-    pub fn check<E: EncodedChallenge<C>>(
+    pub fn check<E: EncodedChallenge<C>, const ZK: bool>(
         self,
         params: &ParamsVerifierIPA<C>,
         vk: &VerifyingKey<C>,
@@ -121,10 +121,11 @@ impl<C: CurveAffine> BatchVerifier<C> {
 
                 let strategy = BatchStrategy::new(params);
                 let mut transcript = Blake2bRead::init(&item.proof[..]);
-                verify_proof(params, vk, strategy, &instances, &mut transcript).map_err(|e| {
-                    tracing::debug!("Batch item {} failed verification: {}", i, e);
-                    e
-                })
+                verify_proof::<_, _, _, _, _, ZK>(params, vk, strategy, &instances, &mut transcript)
+                    .map_err(|e| {
+                        tracing::debug!("Batch item {} failed verification: {}", i, e);
+                        e
+                    })
             })
             .try_fold(
                 || params.empty_msm(),

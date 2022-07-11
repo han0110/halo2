@@ -69,6 +69,7 @@ impl<F: FieldExt> Argument<F> {
         E: EncodedChallenge<Scheme::Curve>,
         R: RngCore,
         T: TranscriptWrite<Scheme::Curve, E>,
+        const ZK: bool,
     >(
         &self,
         pk: &ProvingKey<Scheme::Curve>,
@@ -109,7 +110,7 @@ impl<F: FieldExt> Argument<F> {
 
         // Permute compressed (InputExpression, TableExpression) pair
         let (permuted_input_expression, permuted_table_expression) =
-            permute_expression_pair::<Scheme, _>(
+            permute_expression_pair::<Scheme, _, ZK>(
                 pk,
                 params,
                 domain,
@@ -165,6 +166,7 @@ impl<C: CurveAffine> Permuted<C> {
         E: EncodedChallenge<Scheme::Curve>,
         R: RngCore,
         T: TranscriptWrite<Scheme::Curve, E>,
+        const ZK: bool,
     >(
         self,
         pk: &ProvingKey<Scheme::Curve>,
@@ -174,7 +176,7 @@ impl<C: CurveAffine> Permuted<C> {
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
-        let blinding_factors = pk.vk.cs.blinding_factors();
+        let blinding_factors = pk.vk.cs.blinding_factors::<ZK>();
         // Goal is to compute the products of fractions
         //
         // Numerator: (\theta^{m-1} a_0(\omega^i) + \theta^{m-2} a_1(\omega^i) + ... + \theta a_{m-2}(\omega^i) + a_{m-1}(\omega^i) + \beta)
@@ -249,7 +251,7 @@ impl<C: CurveAffine> Permuted<C> {
         // It can be used for debugging purposes.
         {
             // While in Lagrange basis, check that product is correctly constructed
-            let u = (params.n() as usize) - (blinding_factors + 1);
+            let u = pk.vk.cs.usable_rows::<ZK>(params.n() as usize).end;
 
             // l_0(X) * (1 - z(X)) = 0
             assert_eq!(z[0], Scheme::Scalar::one());
@@ -257,7 +259,7 @@ impl<C: CurveAffine> Permuted<C> {
             // z(\omega X) (a'(X) + \beta) (s'(X) + \gamma)
             // - z(X) (\theta^{m-1} a_0(X) + ... + a_{m-1}(X) + \beta) (\theta^{m-1} s_0(X) + ... + s_{m-1}(X) + \gamma)
             for i in 0..u {
-                let mut left = z[i + 1];
+                let mut left = z[(i + 1) % params.n() as usize];
                 let permuted_input_value = &self.permuted_input_expression[i];
 
                 let permuted_table_value = &self.permuted_table_expression[i];
@@ -279,7 +281,7 @@ impl<C: CurveAffine> Permuted<C> {
             // l_last(X) * (z(X)^2 - z(X)) = 0
             // Assertion will fail only when soundness is broken, in which
             // case this z[u] value will be zero. (bad!)
-            assert_eq!(z[u], Scheme::Scalar::one());
+            assert_eq!(z[u % params.n() as usize], Scheme::Scalar::one());
         }
 
         let product_blind = Blind(Scheme::Scalar::random(rng));
@@ -289,7 +291,7 @@ impl<C: CurveAffine> Permuted<C> {
         // Hash product commitment
         transcript.write_point(product_commitment)?;
 
-        Ok(Committed::<C> {
+        Ok(Committed {
             permuted_input_poly: self.permuted_input_poly,
             permuted_input_blind: self.permuted_input_blind,
             permuted_table_poly: self.permuted_table_poly,
@@ -383,7 +385,7 @@ type ExpressionPair<F> = (Polynomial<F, LagrangeCoeff>, Polynomial<F, LagrangeCo
 /// - the first row in a sequence of like values in A' is the row
 ///   that has the corresponding value in S'.
 /// This method returns (A', S') if no errors are encountered.
-fn permute_expression_pair<'params, Scheme: CommitmentScheme, R: RngCore>(
+fn permute_expression_pair<'params, Scheme: CommitmentScheme, R: RngCore, const ZK: bool>(
     pk: &ProvingKey<Scheme::Curve>,
     params: &'params Scheme::ParamsProver,
     domain: &EvaluationDomain<Scheme::Scalar>,
@@ -391,8 +393,7 @@ fn permute_expression_pair<'params, Scheme: CommitmentScheme, R: RngCore>(
     input_expression: &Polynomial<Scheme::Scalar, LagrangeCoeff>,
     table_expression: &Polynomial<Scheme::Scalar, LagrangeCoeff>,
 ) -> Result<ExpressionPair<Scheme::Scalar>, Error> {
-    let blinding_factors = pk.vk.cs.blinding_factors();
-    let usable_rows = params.n() as usize - (blinding_factors + 1);
+    let usable_rows = pk.vk.cs.usable_rows::<ZK>(params.n() as usize).end;
 
     let mut permuted_input_expression: Vec<Scheme::Scalar> = input_expression.to_vec();
     permuted_input_expression.truncate(usable_rows);
@@ -443,9 +444,9 @@ fn permute_expression_pair<'params, Scheme: CommitmentScheme, R: RngCore>(
     assert!(repeated_input_rows.is_empty());
 
     permuted_input_expression
-        .extend((0..(blinding_factors + 1)).map(|_| Scheme::Scalar::random(&mut rng)));
+        .extend((usable_rows..params.n() as usize).map(|_| Scheme::Scalar::random(&mut rng)));
     permuted_table_coeffs
-        .extend((0..(blinding_factors + 1)).map(|_| Scheme::Scalar::random(&mut rng)));
+        .extend((usable_rows..params.n() as usize).map(|_| Scheme::Scalar::random(&mut rng)));
     assert_eq!(permuted_input_expression.len(), params.n() as usize);
     assert_eq!(permuted_table_coeffs.len(), params.n() as usize);
 

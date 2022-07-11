@@ -19,6 +19,8 @@ use std::marker::PhantomData;
 
 use criterion::{BenchmarkId, Criterion};
 
+const ZK: bool = true;
+
 fn criterion_benchmark(c: &mut Criterion) {
     /// This represents an advice column at a certain row in the ConstraintSystem
     #[derive(Copy, Clone, Debug)]
@@ -265,9 +267,9 @@ fn criterion_benchmark(c: &mut Criterion) {
             a: Value::unknown(),
             k,
         };
-        let vk = keygen_vk::<IPACommitmentScheme<EqAffine>, _>(&params, &empty_circuit)
+        let vk = keygen_vk::<IPACommitmentScheme<EqAffine>, _, ZK>(&params, &empty_circuit)
             .expect("keygen_vk should not fail");
-        let pk = keygen_pk::<IPACommitmentScheme<EqAffine>, _>(&params, vk, &empty_circuit)
+        let pk = keygen_pk::<IPACommitmentScheme<EqAffine>, _, ZK>(&params, vk, &empty_circuit)
             .expect("keygen_pk should not fail");
         (params, pk)
     }
@@ -281,7 +283,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         };
 
         let mut transcript = Blake2bWrite::<_, _, Challenge255<EqAffine>>::init(vec![]);
-        create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, _, _, _, _>(
+        create_proof::<IPACommitmentScheme<EqAffine>, ProverIPA<EqAffine>, _, _, _, _, ZK>(
             params,
             pk,
             &[circuit],
@@ -297,7 +299,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         use halo2_proofs::poly::VerificationStrategy;
         let strategy = SingleStrategy::new(params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
-        assert!(verify_proof(params, vk, strategy, &[&[]], &mut transcript).is_ok());
+        assert!(
+            verify_proof::<_, _, _, _, _, ZK>(params, vk, strategy, &[&[]], &mut transcript)
+                .is_ok()
+        );
     }
 
     let k_range = 8..=16;

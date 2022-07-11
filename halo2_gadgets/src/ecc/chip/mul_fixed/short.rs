@@ -404,6 +404,8 @@ pub mod tests {
         Ok(())
     }
 
+    const ZK: bool = true;
+
     #[test]
     fn invalid_magnitude_sign() {
         use crate::{
@@ -563,7 +565,7 @@ pub mod tests {
             ];
 
             for circuit in circuits.iter() {
-                let prover = MockProver::<pallas::Base>::run(11, circuit, vec![]).unwrap();
+                let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, circuit, vec![]).unwrap();
                 circuit.magnitude_error.assert_if_known(|magnitude_error| {
                     assert_eq!(
                         prover.verify(),
@@ -621,7 +623,7 @@ pub mod tests {
                     .y()
             };
 
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(
                 prover.verify(),
                 Err(vec![
