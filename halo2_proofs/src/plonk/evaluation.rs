@@ -765,13 +765,13 @@ impl<C: CurveAffine> GraphEvaluator<C> {
 }
 
 /// Simple evaluation of an expression
-pub fn evaluate<F: FieldExt, B: Basis>(
+pub fn evaluate<F: Field>(
     expression: &Expression<F>,
     size: usize,
     rot_scale: i32,
-    fixed: &[Polynomial<F, B>],
-    advice: &[Polynomial<F, B>],
-    instance: &[Polynomial<F, B>],
+    fixed: &[&[F]],
+    advice: &[&[F]],
+    instance: &[&[F]],
     challenges: &[F],
 ) -> Vec<F> {
     let mut values = vec![F::zero(); size];

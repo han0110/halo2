@@ -2,7 +2,9 @@ use core::cmp::max;
 use core::ops::{Add, Mul};
 use ff::Field;
 use std::{
+    collections::HashSet,
     convert::TryFrom,
+    iter,
     ops::{Neg, Range, Sub},
 };
 
@@ -480,8 +482,8 @@ impl TableColumn {
 /// A challenge squeezed from transcript after advice columns at the phase have been committed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Challenge {
-    index: usize,
-    phase: sealed::Phase,
+    pub(crate) index: usize,
+    pub(crate) phase: sealed::Phase,
 }
 
 impl Challenge {
@@ -585,6 +587,11 @@ pub trait Assignment<F: Field> {
     ///
     /// Returns `Value::unknown()` if the current synthesis phase is before the challenge can be queried.
     fn get_challenge(&self, challenge: Challenge) -> Value<F>;
+
+    /// Evaluate given `Expression` on committed polynomials.
+    ///
+    /// Returns `Value::unknown()` if any part of given `Expression` has not been committed.
+    fn evaluate_committed(&self, _: &Expression<F>) -> Value<Vec<F>>;
 
     /// Creates a new (sub)namespace and enters into it.
     ///
@@ -981,6 +988,64 @@ impl<F: Field> Expression<F> {
     /// Square this expression.
     pub fn square(self) -> Self {
         self.clone() * self
+    }
+
+    /// Returns queries of specified column type.
+    pub fn queries<C: Into<Any>>(&self, column_type: C) -> HashSet<usize> {
+        let column_type = column_type.into();
+        let empty = HashSet::default();
+        self.evaluate(
+            &|_| empty.clone(),
+            &|_| empty.clone(),
+            &|query| {
+                if matches!(column_type, Any::Fixed) {
+                    iter::once(query.column_index()).collect()
+                } else {
+                    empty.clone()
+                }
+            },
+            &|query| {
+                if matches!(column_type, Any::Advice(_)) {
+                    iter::once(query.column_index()).collect()
+                } else {
+                    empty.clone()
+                }
+            },
+            &|query| {
+                if matches!(column_type, Any::Instance) {
+                    iter::once(query.column_index()).collect()
+                } else {
+                    empty.clone()
+                }
+            },
+            &|_| empty.clone(),
+            &|a| a,
+            &|mut a, b| {
+                a.extend(b);
+                a
+            },
+            &|mut a, b| {
+                a.extend(b);
+                a
+            },
+            &|a, _| a,
+        )
+    }
+
+    /// Returns maximum phase used in this `Expression`.
+    pub fn max_phase(&self) -> sealed::Phase {
+        sealed::Phase(self.evaluate(
+            &|_| 0,
+            &|_| 0,
+            &|_| 0,
+            &|query| query.phase(),
+            &|_| 0,
+            &|challenge| challenge.phase(),
+            &|a| a,
+            &|a, b| a.max(b),
+            &|a, b| a.max(b),
+            &|a, _| a,
+        ))
     }
 
     /// Returns whether or not this expression contains a simple `Selector`.

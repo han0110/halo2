@@ -5,7 +5,7 @@ use crate::{
     circuit::Value,
     plonk::{
         Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ConstraintSystem, Error,
-        Fixed, FloorPlanner, Instance, Selector,
+        Expression, Fixed, FloorPlanner, Instance, Selector,
     },
 };
 
@@ -158,6 +158,10 @@ impl<F: Field> Assignment<F> for Graph {
     }
 
     fn get_challenge(&self, _: Challenge) -> Value<F> {
+        Value::unknown()
+    }
+
+    fn evaluate_committed(&self, _: &Expression<F>) -> Value<Vec<F>> {
         Value::unknown()
     }
 

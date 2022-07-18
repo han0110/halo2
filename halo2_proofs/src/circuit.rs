@@ -7,7 +7,8 @@ use ff::Field;
 use crate::{
     arithmetic::FieldExt,
     plonk::{
-        Advice, Any, Assigned, Challenge, Column, Error, Fixed, Instance, Selector, TableColumn,
+        Advice, Any, Assigned, Challenge, Column, Error, Expression, Fixed, Instance, Selector,
+        TableColumn,
     },
 };
 
@@ -448,6 +449,11 @@ pub trait Layouter<F: Field> {
     /// Returns `Value::unknown()` if the current synthesis phase is before the challenge can be queried.
     fn get_challenge(&self, challenge: Challenge) -> Value<F>;
 
+    /// Evaluate given `Expression` on committed polynomials.
+    ///
+    /// Returns `Value::unknown()` if any part of given `Expression` has not been committed.
+    fn evaluate_committed(&self, _: &Expression<F>) -> Value<Vec<F>>;
+
     /// Gets the "root" of this assignment, bypassing the namespacing.
     ///
     /// Not intended for downstream consumption; use [`Layouter::namespace`] instead.
@@ -515,6 +521,10 @@ impl<'a, F: Field, L: Layouter<F> + 'a> Layouter<F> for NamespacedLayouter<'a, F
 
     fn get_challenge(&self, challenge: Challenge) -> Value<F> {
         self.0.get_challenge(challenge)
+    }
+
+    fn evaluate_committed(&self, expression: &Expression<F>) -> Value<Vec<F>> {
+        self.0.evaluate_committed(expression)
     }
 
     fn get_root(&mut self) -> &mut Self::Root {

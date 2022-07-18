@@ -178,6 +178,10 @@ impl<F: Field> Assignment<F> for Assembly<F> {
         Value::unknown()
     }
 
+    fn evaluate_committed(&self, _: &Expression<F>) -> Value<Vec<F>> {
+        Value::unknown()
+    }
+
     fn push_namespace<NR, N>(&mut self, _: N)
     where
         NR: Into<String>,

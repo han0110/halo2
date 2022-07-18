@@ -23,7 +23,7 @@ use std::{any::TypeId, convert::TryInto, num::ParseIntError, ops::Index};
 use std::{
     collections::BTreeMap,
     iter,
-    ops::{Mul, MulAssign},
+    ops::{Deref, Mul, MulAssign},
 };
 
 #[derive(Debug)]
@@ -92,9 +92,18 @@ impl<F: FieldExt> Argument<F> {
                         expression,
                         params.n() as usize,
                         1,
-                        fixed_values,
-                        advice_values,
-                        instance_values,
+                        &fixed_values
+                            .iter()
+                            .map(|values| values.deref())
+                            .collect::<Vec<_>>(),
+                        &advice_values
+                            .iter()
+                            .map(|values| values.deref())
+                            .collect::<Vec<_>>(),
+                        &instance_values
+                            .iter()
+                            .map(|values| values.deref())
+                            .collect::<Vec<_>>(),
                         challenges,
                     ))
                 })

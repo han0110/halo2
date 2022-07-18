@@ -14,9 +14,12 @@ use crate::{
     arithmetic::{FieldExt, Group},
     circuit,
     plonk::{
-        permutation, Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ColumnType,
-        ConstraintSystem, Error, Expression, Fixed, FloorPlanner, Instance, Phase, Selector,
-        VirtualCell,
+        evaluation::evaluate,
+        permutation,
+        sealed::{self, SealedPhase},
+        Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ColumnType,
+        ConstraintSystem, Error, Expression, FirstPhase, Fixed, FloorPlanner, Instance, Phase,
+        Selector, VirtualCell,
     },
     poly::Rotation,
 };
@@ -295,6 +298,8 @@ pub struct MockProver<F: Group + Field> {
     // The instance cells in the circuit, arranged as [column][row].
     instance: Vec<Vec<F>>,
 
+    current_phase: sealed::Phase,
+
     selectors: Vec<Vec<bool>>,
 
     challenges: Vec<F>,
@@ -305,12 +310,22 @@ pub struct MockProver<F: Group + Field> {
     usable_rows: Range<usize>,
 }
 
+impl<F: Field + Group> MockProver<F> {
+    fn in_phase<P: SealedPhase>(&self, phase: P) -> bool {
+        self.current_phase == phase.to_sealed()
+    }
+}
+
 impl<F: Field + Group> Assignment<F> for MockProver<F> {
     fn enter_region<NR, N>(&mut self, name: N)
     where
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
+        if !self.in_phase(FirstPhase) {
+            return;
+        }
+
         assert!(self.current_region.is_none());
         self.current_region = Some(Region {
             name: name().into(),
@@ -322,6 +337,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
     }
 
     fn exit_region(&mut self) {
+        if !self.in_phase(FirstPhase) {
+            return;
+        }
+
         self.regions.push(self.current_region.take().unwrap());
     }
 
@@ -330,6 +349,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
+        if !self.in_phase(FirstPhase) {
+            return Ok(());
+        }
+
         if !self.usable_rows.contains(&row) {
             return Err(Error::not_enough_rows_available(self.k));
         }
@@ -378,25 +401,29 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
-        if !self.usable_rows.contains(&row) {
-            return Err(Error::not_enough_rows_available(self.k));
+        if self.in_phase(FirstPhase) {
+            if !self.usable_rows.contains(&row) {
+                return Err(Error::not_enough_rows_available(self.k));
+            }
+
+            if let Some(region) = self.current_region.as_mut() {
+                region.update_extent(column.into(), row);
+                region
+                    .cells
+                    .entry((column.into(), row))
+                    .and_modify(|count| *count += 1)
+                    .or_default();
+            }
         }
 
-        if let Some(region) = self.current_region.as_mut() {
-            region.update_extent(column.into(), row);
-            region
-                .cells
-                .entry((column.into(), row))
-                .and_modify(|count| *count += 1)
-                .or_default();
+        if self.current_phase == column.column_type().phase {
+            *self
+                .advice
+                .get_mut(column.index())
+                .and_then(|v| v.get_mut(row))
+                .ok_or(Error::BoundsFailure)? =
+                CellValue::Assigned(to().into_field().evaluate().assign()?);
         }
-
-        *self
-            .advice
-            .get_mut(column.index())
-            .and_then(|v| v.get_mut(row))
-            .ok_or(Error::BoundsFailure)? =
-            CellValue::Assigned(to().into_field().evaluate().assign()?);
 
         Ok(())
     }
@@ -414,6 +441,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         A: FnOnce() -> AR,
         AR: Into<String>,
     {
+        if !self.in_phase(FirstPhase) {
+            return Ok(());
+        }
+
         if !self.usable_rows.contains(&row) {
             return Err(Error::not_enough_rows_available(self.k));
         }
@@ -444,6 +475,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         right_column: Column<Any>,
         right_row: usize,
     ) -> Result<(), crate::plonk::Error> {
+        if !self.in_phase(FirstPhase) {
+            return Ok(());
+        }
+
         if !self.usable_rows.contains(&left_row) || !self.usable_rows.contains(&right_row) {
             return Err(Error::not_enough_rows_available(self.k));
         }
@@ -458,6 +493,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         from_row: usize,
         to: circuit::Value<Assigned<F>>,
     ) -> Result<(), Error> {
+        if !self.in_phase(FirstPhase) {
+            return Ok(());
+        }
+
         if !self.usable_rows.contains(&from_row) {
             return Err(Error::not_enough_rows_available(self.k));
         }
@@ -470,7 +509,62 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
     }
 
     fn get_challenge(&self, challenge: Challenge) -> circuit::Value<F> {
+        if self.current_phase <= challenge.phase {
+            return circuit::Value::unknown();
+        }
+
         circuit::Value::known(self.challenges[challenge.index()])
+    }
+
+    fn evaluate_committed(&self, expression: &Expression<F>) -> circuit::Value<Vec<F>> {
+        if self.current_phase <= expression.max_phase() {
+            return circuit::Value::unknown();
+        }
+
+        let collect_values = |queries: HashSet<usize>, values: &[Vec<CellValue<F>>]| {
+            values
+                .iter()
+                .enumerate()
+                .map(|(column_index, values)| {
+                    if queries.contains(&column_index) {
+                        values
+                            .iter()
+                            .map(|value| match value {
+                                CellValue::Unassigned => F::zero(),
+                                CellValue::Assigned(value) => *value,
+                                CellValue::Poison(_) => F::zero(),
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let fixed = collect_values(expression.queries(Any::Fixed), &self.fixed);
+        let advice = collect_values(expression.queries(Any::advice()), &self.advice);
+
+        let evaluted = evaluate(
+            expression,
+            self.n as usize,
+            1,
+            &fixed
+                .iter()
+                .map(|values| values.as_slice())
+                .collect::<Vec<_>>(),
+            &advice
+                .iter()
+                .map(|values| values.as_slice())
+                .collect::<Vec<_>>(),
+            &self
+                .instance
+                .iter()
+                .map(|values| values.as_slice())
+                .collect::<Vec<_>>(),
+            &self.challenges,
+        );
+        circuit::Value::known(evaluted)
     }
 
     fn push_namespace<NR, N>(&mut self, _: N)
@@ -559,13 +653,22 @@ impl<F: FieldExt> MockProver<F> {
             fixed,
             advice,
             instance,
+            current_phase: FirstPhase.to_sealed(),
             selectors,
             challenges,
             permutation,
             usable_rows: 0..usable_rows,
         };
 
-        ConcreteCircuit::FloorPlanner::synthesize(&mut prover, circuit, config, constants)?;
+        for current_phase in prover.cs.phases() {
+            prover.current_phase = current_phase;
+            ConcreteCircuit::FloorPlanner::synthesize(
+                &mut prover,
+                circuit,
+                config.clone(),
+                constants.clone(),
+            )?;
+        }
 
         let (cs, selector_polys) = prover.cs.compress_selectors::<ZK>(prover.selectors.clone());
         prover.cs = cs;

@@ -14,7 +14,7 @@ use crate::{
     circuit::Value,
     plonk::{
         Advice, Any, Assigned, Assignment, Challenge, Circuit, Column, ConstraintSystem, Error,
-        Fixed, FloorPlanner, Instance, Selector,
+        Expression, Fixed, FloorPlanner, Instance, Selector,
     },
     poly::Rotation,
 };
@@ -119,6 +119,10 @@ impl<F: Field> Assignment<F> for Assembly {
     }
 
     fn get_challenge(&self, _: Challenge) -> Value<F> {
+        Value::unknown()
+    }
+
+    fn evaluate_committed(&self, _: &Expression<F>) -> Value<Vec<F>> {
         Value::unknown()
     }
 

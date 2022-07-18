@@ -4,7 +4,7 @@ use halo2curves::CurveExt;
 use rand_core::RngCore;
 use std::collections::BTreeSet;
 use std::env::var;
-use std::ops::RangeTo;
+use std::ops::{Deref, RangeTo};
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 use std::{collections::HashMap, iter, mem, sync::atomic::Ordering};
@@ -15,6 +15,7 @@ use super::{
         Advice, Any, Assignment, Challenge, Circuit, Column, ConstraintSystem, FirstPhase, Fixed,
         FloorPlanner, Instance, Selector,
     },
+    evaluation::evaluate,
     lookup, permutation, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
     ChallengeY, Error, Expression, ProvingKey,
 };
@@ -135,24 +136,28 @@ pub fn create_proof<
         .collect::<Result<Vec<_>, _>>()?;
 
     #[derive(Clone)]
-    struct AdviceSingle<C: CurveAffine> {
-        pub advice_values: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
-        pub advice_polys: Vec<Polynomial<C::Scalar, Coeff>>,
-        pub advice_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
-        pub advice_blinds: Vec<Blind<C::Scalar>>,
+    struct AdviceSingle<F: FieldExt> {
+        pub advice_values: Vec<Polynomial<F, LagrangeCoeff>>,
+        pub advice_polys: Vec<Polynomial<F, Coeff>>,
+        pub advice_cosets: Vec<Polynomial<F, ExtendedLagrangeCoeff>>,
+        pub advice_blinds: Vec<Blind<F>>,
     }
 
-    struct WitnessCollection<'a, F: Field> {
+    struct WitnessCollection<'a, F: FieldExt> {
         k: u32,
+        n: u32,
         current_phase: sealed::Phase,
+        fixed: &'a [Polynomial<F, LagrangeCoeff>],
+        committed_advice: &'a AdviceSingle<F>,
         advice: Vec<Polynomial<Assigned<F>, LagrangeCoeff>>,
         challenges: &'a HashMap<usize, F>,
+        num_challenges: usize,
         instances: &'a [&'a [F]],
         usable_rows: RangeTo<usize>,
         _marker: std::marker::PhantomData<F>,
     }
 
-    impl<'a, F: Field> Assignment<F> for WitnessCollection<'a, F> {
+    impl<'a, F: FieldExt> Assignment<F> for WitnessCollection<'a, F> {
         fn enter_region<NR, N>(&mut self, _: N)
         where
             NR: Into<String>,
@@ -265,6 +270,34 @@ pub fn create_proof<
                 .unwrap_or_else(Value::unknown)
         }
 
+        fn evaluate_committed(&self, expression: &Expression<F>) -> Value<Vec<F>> {
+            if self.current_phase <= expression.max_phase() {
+                return Value::unknown();
+            }
+
+            let evaluted = evaluate(
+                expression,
+                self.n as usize,
+                1,
+                &self
+                    .fixed
+                    .iter()
+                    .map(|values| values.deref())
+                    .collect::<Vec<_>>(),
+                &self
+                    .committed_advice
+                    .advice_values
+                    .iter()
+                    .map(|values| values.deref())
+                    .collect::<Vec<_>>(),
+                self.instances,
+                &(0..self.num_challenges)
+                    .map(|index| self.challenges.get(&index).cloned().unwrap_or_default())
+                    .collect::<Vec<_>>(),
+            );
+            Value::known(evaluted)
+        }
+
         fn push_namespace<NR, N>(&mut self, _: N)
         where
             NR: Into<String>,
@@ -280,7 +313,7 @@ pub fn create_proof<
 
     let (advice, challenges) = {
         let mut advice = vec![
-            AdviceSingle::<Scheme::Curve> {
+            AdviceSingle {
                 advice_values: vec![domain.empty_lagrange(); meta.num_advice_columns],
                 advice_polys: vec![domain.empty_coeff(); meta.num_advice_columns],
                 advice_cosets: vec![domain.empty_extended(); meta.num_advice_columns],
@@ -310,10 +343,14 @@ pub fn create_proof<
             {
                 let mut witness = WitnessCollection {
                     k: params.k(),
+                    n: params.n() as u32,
                     current_phase,
+                    fixed: &pk.fixed_values,
+                    committed_advice: advice,
                     advice: vec![domain.empty_lagrange_assigned(); meta.num_advice_columns],
                     instances,
                     challenges: &challenges,
+                    num_challenges: meta.num_challenges,
                     // The prover will not be allowed to assign values to advice
                     // cells that exist within inactive rows, which include some
                     // number of blinding factors and an extra row for use in the

@@ -19,7 +19,7 @@ use crate::transcript::{ChallengeScalar, EncodedChallenge, Transcript};
 mod assigned;
 mod circuit;
 mod error;
-mod evaluation;
+pub(crate) mod evaluation;
 mod keygen;
 mod lookup;
 pub(crate) mod permutation;
