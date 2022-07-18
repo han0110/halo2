@@ -7,8 +7,9 @@ use group::{
     ff::{BatchInvert, PrimeField},
     Group as _,
 };
+use std::iter;
 
-pub use pasta_curves::arithmetic::*;
+pub use halo2curves::{CurveAffine, CurveExt, FieldExt, Group};
 
 fn multiexp_serial<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C], acc: &mut C::Curve) {
     let coeffs: Vec<_> = coeffs.iter().map(|a| a.to_repr()).collect();
@@ -410,11 +411,35 @@ pub fn lagrange_interpolate<F: FieldExt>(points: &[F], evals: &[F]) -> Vec<F> {
     }
 }
 
+pub(crate) fn evaluate_vanishing_polynomial<F: FieldExt>(roots: &[F], z: F) -> F {
+    fn evaluate<F: FieldExt>(roots: &[F], z: F) -> F {
+        roots.iter().fold(F::one(), |acc, point| (z - point) * acc)
+    }
+    let n = roots.len();
+    let num_threads = multicore::current_num_threads();
+    if n * 2 < num_threads {
+        evaluate(roots, z)
+    } else {
+        let chunk_size = (n + num_threads - 1) / num_threads;
+        let mut parts = vec![F::one(); num_threads];
+        multicore::scope(|scope| {
+            for (out, roots) in parts.chunks_mut(1).zip(roots.chunks(chunk_size)) {
+                scope.spawn(move |_| out[0] = evaluate(roots, z));
+            }
+        });
+        parts.iter().fold(F::one(), |acc, part| acc * part)
+    }
+}
+
+pub(crate) fn powers<F: FieldExt>(base: F) -> impl Iterator<Item = F> {
+    iter::successors(Some(F::one()), move |power| Some(base * power))
+}
+
 #[cfg(test)]
 use rand_core::OsRng;
 
 #[cfg(test)]
-use crate::pasta::Fp;
+use crate::halo2curves::pasta::Fp;
 
 #[test]
 fn test_lagrange_interpolate() {
