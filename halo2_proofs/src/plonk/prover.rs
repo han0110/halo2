@@ -46,6 +46,7 @@ pub fn create_proof<
     R: RngCore,
     T: TranscriptWrite<Scheme::Curve, E>,
     ConcreteCircuit: Circuit<Scheme::Scalar>,
+    const ZK: bool,
 >(
     params: &'params Scheme::ParamsProver,
     pk: &ProvingKey<Scheme::Curve>,
@@ -90,7 +91,7 @@ where
                 .map(|values| {
                     let mut poly = domain.empty_lagrange();
                     assert_eq!(poly.len(), params.n() as usize);
-                    if values.len() > (poly.len() - (meta.blinding_factors() + 1)) {
+                    if ZK && values.len() > meta.usable_rows::<ZK>(params.n() as usize).end {
                         return Err(Error::InstanceTooLarge);
                     }
                     for (poly, value) in poly.iter_mut().zip(values.iter()) {
@@ -297,7 +298,7 @@ where
         ];
         let mut challenges = HashMap::<usize, Scheme::Scalar>::with_capacity(meta.num_challenges);
 
-        let unusable_rows_start = params.n() as usize - (meta.blinding_factors() + 1);
+        let unusable_rows_start = meta.usable_rows::<ZK>(params.n() as usize).end;
         for current_phase in pk.vk.cs.phases() {
             let column_indices = meta
                 .advice_column_phase
@@ -352,10 +353,12 @@ where
                         .collect(),
                 );
 
-                // Add blinding factors to advice columns
-                for advice_values in &mut advice_values {
-                    for cell in &mut advice_values[unusable_rows_start..] {
-                        *cell = Scheme::Scalar::random(&mut rng);
+                // Add blinding factors to advice columns if ZK is enabled
+                if ZK {
+                    for advice in &mut advice_values {
+                        for cell in &mut advice[unusable_rows_start..] {
+                            *cell = Scheme::Scalar::random(&mut rng);
+                        }
                     }
                 }
 
@@ -419,7 +422,7 @@ where
                 .lookups
                 .iter()
                 .map(|lookup| {
-                    lookup.commit_permuted(
+                    lookup.commit_permuted::<_, _, _, _, _, ZK>(
                         pk,
                         params,
                         domain,
@@ -447,7 +450,7 @@ where
         .iter()
         .zip(advice.iter())
         .map(|(instance, advice)| {
-            pk.vk.cs.permutation.commit(
+            pk.vk.cs.permutation.commit::<_, _, _, _, _, ZK>(
                 params,
                 pk,
                 &pk.permutation,
@@ -468,13 +471,18 @@ where
             // Construct and commit to products for each lookup
             lookups
                 .into_iter()
-                .map(|lookup| lookup.commit_product(pk, params, beta, gamma, &mut rng, transcript))
+                .map(|lookup| {
+                    lookup.commit_product::<_, _, _, _, ZK>(
+                        pk, params, beta, gamma, &mut rng, transcript,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Commit to the vanishing argument's random polynomial for blinding h(x_3)
-    let vanishing = vanishing::Argument::commit(params, domain, &mut rng, transcript)?;
+    let vanishing =
+        vanishing::Argument::commit::<_, _, _, _, ZK>(params, domain, &mut rng, transcript)?;
 
     // Obtain challenge for keeping all separate gates linearly independent
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
@@ -499,7 +507,7 @@ where
         .collect();
 
     // Evaluate the h(X) polynomial
-    let h_poly = pk.ev.evaluate_h(
+    let h_poly = pk.ev.evaluate_h::<ZK>(
         pk,
         &advice
             .iter()
@@ -580,7 +588,7 @@ where
         transcript.write_scalar(*eval)?;
     }
 
-    let vanishing = vanishing.evaluate(x, xn, domain, transcript)?;
+    let vanishing = vanishing.evaluate::<_, _, ZK>(x, xn, domain, transcript)?;
 
     // Evaluate common permutation data
     pk.permutation.evaluate(x, transcript)?;
@@ -588,7 +596,11 @@ where
     // Evaluate the permutations, if any, at omega^i x.
     let permutations: Vec<permutation::prover::Evaluated<Scheme::Curve>> = permutations
         .into_iter()
-        .map(|permutation| -> Result<_, _> { permutation.construct().evaluate(pk, x, transcript) })
+        .map(|permutation| -> Result<_, _> {
+            permutation
+                .construct()
+                .evaluate::<_, _, ZK>(pk, x, transcript)
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Evaluate the lookups, if any, at omega^i x.
@@ -632,7 +644,7 @@ where
                             blind: advice.advice_blinds[column.index()],
                         }),
                 )
-                .chain(permutation.open(pk, x))
+                .chain(permutation.open::<ZK>(pk, x))
                 .chain(lookups.iter().flat_map(move |p| p.open(pk, x)).into_iter())
         })
         .chain(
@@ -648,7 +660,7 @@ where
         )
         .chain(pk.permutation.open(x))
         // We query the h(X) polynomial at x
-        .chain(vanishing.open(x));
+        .chain(vanishing.open::<ZK>(x));
 
     let prover = P::new(params);
     prover

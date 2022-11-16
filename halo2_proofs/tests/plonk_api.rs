@@ -420,7 +420,7 @@ fn plonk_api() {
             // k that is too small for the minimum required number of rows.
             let much_too_small_params= <$scheme as CommitmentScheme>::ParamsProver::new(1);
             assert_matches!(
-                keygen_vk(&much_too_small_params, &empty_circuit),
+                keygen_vk::<_, _, _, ZK>(&much_too_small_params, &empty_circuit),
                 Err(Error::NotEnoughRowsAvailable {
                     current_k,
                 }) if current_k == 1
@@ -430,7 +430,7 @@ fn plonk_api() {
             // k that is too small for the number of rows the circuit uses.
             let slightly_too_small_params = <$scheme as CommitmentScheme>::ParamsProver::new(K-1);
             assert_matches!(
-                keygen_vk(&slightly_too_small_params, &empty_circuit),
+                keygen_vk::<_, _, _, ZK>(&slightly_too_small_params, &empty_circuit),
                 Err(Error::NotEnoughRowsAvailable {
                     current_k,
                 }) if current_k == K - 1
@@ -438,7 +438,9 @@ fn plonk_api() {
         }};
     }
 
-    fn keygen<Scheme: CommitmentScheme>(params: &Scheme::ParamsProver) -> ProvingKey<Scheme::Curve>
+    fn keygen<Scheme: CommitmentScheme, const ZK: bool>(
+        params: &Scheme::ParamsProver,
+    ) -> ProvingKey<Scheme::Curve>
     where
         Scheme::Scalar: FromUniformBytes<64> + WithSmallOrderMulGroup<3>,
     {
@@ -449,9 +451,10 @@ fn plonk_api() {
         };
 
         // Initialize the proving key
-        let vk = keygen_vk(params, &empty_circuit).expect("keygen_vk should not fail");
+        let vk =
+            keygen_vk::<_, _, _, ZK>(params, &empty_circuit).expect("keygen_vk should not fail");
 
-        keygen_pk(params, vk, &empty_circuit).expect("keygen_pk should not fail")
+        keygen_pk::<_, _, _, ZK>(params, vk, &empty_circuit).expect("keygen_pk should not fail")
     }
 
     fn create_proof<
@@ -461,6 +464,7 @@ fn plonk_api() {
         E: EncodedChallenge<Scheme::Curve>,
         R: RngCore,
         T: TranscriptWriterBuffer<Vec<u8>, Scheme::Curve, E>,
+        const ZK: bool,
     >(
         rng: R,
         params: &'params Scheme::ParamsProver,
@@ -478,7 +482,7 @@ fn plonk_api() {
 
         let mut transcript = T::init(vec![]);
 
-        create_plonk_proof::<Scheme, P, _, _, _, _>(
+        create_plonk_proof::<Scheme, P, _, _, _, _, ZK>(
             params,
             pk,
             &[circuit.clone(), circuit.clone()],
@@ -489,7 +493,7 @@ fn plonk_api() {
         .expect("proof generation should not fail");
 
         // Check this circuit is satisfied.
-        let prover = match MockProver::run(K, &circuit, vec![vec![instance]]) {
+        let prover = match MockProver::run::<_, ZK>(K, &circuit, vec![vec![instance]]) {
             Ok(prover) => prover,
             Err(e) => panic!("{:?}", e),
         };
@@ -506,6 +510,7 @@ fn plonk_api() {
         E: EncodedChallenge<Scheme::Curve>,
         T: TranscriptReadBuffer<&'a [u8], Scheme::Curve, E>,
         Strategy: VerificationStrategy<'params, Scheme, V, Output = Strategy>,
+        const ZK: bool,
     >(
         params_verifier: &'params Scheme::ParamsVerifier,
         vk: &VerifyingKey<Scheme::Curve>,
@@ -519,7 +524,7 @@ fn plonk_api() {
         let mut transcript = T::init(proof);
 
         let strategy = Strategy::new(params_verifier);
-        let strategy = verify_plonk_proof(
+        let strategy = verify_plonk_proof::<_, _, _, _, _, ZK>(
             params_verifier,
             vk,
             strategy,
@@ -531,7 +536,7 @@ fn plonk_api() {
         assert!(strategy.finalize());
     }
 
-    fn test_plonk_api_gwc() {
+    fn test_plonk_api_gwc<const ZK: bool>() {
         use halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
         use halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
         use halo2_proofs::poly::kzg::strategy::AccumulatorStrategy;
@@ -543,9 +548,9 @@ fn plonk_api() {
         let params = ParamsKZG::<Bn256>::new(K);
         let rng = OsRng;
 
-        let pk = keygen::<KZGCommitmentScheme<_>>(&params);
+        let pk = keygen::<KZGCommitmentScheme<_>, ZK>(&params);
 
-        let proof = create_proof::<_, ProverGWC<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>>(
+        let proof = create_proof::<_, ProverGWC<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>, ZK>(
             rng, &params, &pk,
         );
 
@@ -557,10 +562,11 @@ fn plonk_api() {
             _,
             Blake2bRead<_, _, Challenge255<_>>,
             AccumulatorStrategy<_>,
+            ZK,
         >(verifier_params, pk.get_vk(), &proof[..]);
     }
 
-    fn test_plonk_api_shplonk() {
+    fn test_plonk_api_shplonk<const ZK: bool>() {
         use halo2_proofs::poly::kzg::commitment::{KZGCommitmentScheme, ParamsKZG};
         use halo2_proofs::poly::kzg::multiopen::{ProverSHPLONK, VerifierSHPLONK};
         use halo2_proofs::poly::kzg::strategy::AccumulatorStrategy;
@@ -572,11 +578,12 @@ fn plonk_api() {
         let params = ParamsKZG::<Bn256>::new(K);
         let rng = OsRng;
 
-        let pk = keygen::<KZGCommitmentScheme<_>>(&params);
+        let pk = keygen::<KZGCommitmentScheme<_>, ZK>(&params);
 
-        let proof = create_proof::<_, ProverSHPLONK<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>>(
-            rng, &params, &pk,
-        );
+        let proof =
+            create_proof::<_, ProverSHPLONK<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>, ZK>(
+                rng, &params, &pk,
+            );
 
         let verifier_params = params.verifier_params();
 
@@ -586,10 +593,11 @@ fn plonk_api() {
             _,
             Blake2bRead<_, _, Challenge255<_>>,
             AccumulatorStrategy<_>,
+            ZK,
         >(verifier_params, pk.get_vk(), &proof[..]);
     }
 
-    fn test_plonk_api_ipa() {
+    fn test_plonk_api_ipa<const ZK: bool>() {
         use halo2_proofs::poly::ipa::commitment::{IPACommitmentScheme, ParamsIPA};
         use halo2_proofs::poly::ipa::multiopen::{ProverIPA, VerifierIPA};
         use halo2_proofs::poly::ipa::strategy::AccumulatorStrategy;
@@ -601,9 +609,9 @@ fn plonk_api() {
         let params = ParamsIPA::<EqAffine>::new(K);
         let rng = OsRng;
 
-        let pk = keygen::<IPACommitmentScheme<EqAffine>>(&params);
+        let pk = keygen::<IPACommitmentScheme<EqAffine>, ZK>(&params);
 
-        let proof = create_proof::<_, ProverIPA<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>>(
+        let proof = create_proof::<_, ProverIPA<_>, _, _, Blake2bWrite<_, _, Challenge255<_>>, ZK>(
             rng, &params, &pk,
         );
 
@@ -615,10 +623,11 @@ fn plonk_api() {
             _,
             Blake2bRead<_, _, Challenge255<_>>,
             AccumulatorStrategy<_>,
+            ZK,
         >(verifier_params, pk.get_vk(), &proof[..]);
 
         // Check that the verification key has not changed unexpectedly
-        {
+        if ZK {
             //panic!("{:#?}", pk.get_vk().pinned());
             assert_eq!(
                 format!("{:#?}", pk.get_vk().pinned()),
@@ -1019,8 +1028,10 @@ fn plonk_api() {
             );
         }
     }
-
-    test_plonk_api_ipa();
-    test_plonk_api_gwc();
-    test_plonk_api_shplonk();
+    test_plonk_api_ipa::<true>();
+    test_plonk_api_gwc::<true>();
+    test_plonk_api_shplonk::<true>();
+    test_plonk_api_ipa::<false>();
+    test_plonk_api_gwc::<false>();
+    test_plonk_api_shplonk::<false>();
 }

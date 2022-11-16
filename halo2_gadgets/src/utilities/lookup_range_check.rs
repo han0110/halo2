@@ -487,13 +487,15 @@ mod tests {
             }
         }
 
+        const ZK: bool = true;
+
         {
             let circuit: MyCircuit<pallas::Base> = MyCircuit {
                 num_words: 6,
                 _marker: PhantomData,
             };
 
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(prover.verify(), Ok(()));
         }
     }
@@ -546,13 +548,15 @@ mod tests {
             }
         }
 
+        const ZK: bool = true;
+
         // Edge case: zero bits
         {
             let circuit: MyCircuit<pallas::Base> = MyCircuit {
                 element: Value::known(pallas::Base::zero()),
                 num_bits: 0,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(prover.verify(), Ok(()));
         }
 
@@ -562,7 +566,7 @@ mod tests {
                 element: Value::known(pallas::Base::from((1 << K) - 1)),
                 num_bits: K,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(prover.verify(), Ok(()));
         }
 
@@ -572,7 +576,7 @@ mod tests {
                 element: Value::known(pallas::Base::from((1 << 6) - 1)),
                 num_bits: 6,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(prover.verify(), Ok(()));
         }
 
@@ -582,7 +586,7 @@ mod tests {
                 element: Value::known(pallas::Base::from(1 << 6)),
                 num_bits: 6,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(
                 prover.verify(),
                 Err(vec![VerifyFailure::Lookup {
@@ -602,7 +606,7 @@ mod tests {
                 element: Value::known(pallas::Base::from(1 << K)),
                 num_bits: 6,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(
                 prover.verify(),
                 Err(vec![
@@ -641,7 +645,7 @@ mod tests {
                 element: Value::known(element),
                 num_bits: num_bits as usize,
             };
-            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            let prover = MockProver::<pallas::Base>::run::<_, ZK>(11, &circuit, vec![]).unwrap();
             assert_eq!(
                 prover.verify(),
                 Err(vec![VerifyFailure::Lookup {

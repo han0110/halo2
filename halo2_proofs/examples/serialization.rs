@@ -129,11 +129,12 @@ impl Circuit<Fr> for StandardPlonk {
 }
 
 fn main() {
+    const ZK: bool = true;
     let k = 4;
     let circuit = StandardPlonk(Fr::random(OsRng));
     let params = ParamsKZG::<Bn256>::setup(k, OsRng);
-    let vk = keygen_vk(&params, &circuit).expect("vk should not fail");
-    let pk = keygen_pk(&params, vk, &circuit).expect("pk should not fail");
+    let vk = keygen_vk::<_, _, _, ZK>(&params, &circuit).expect("vk should not fail");
+    let pk = keygen_pk::<_, _, _, ZK>(&params, vk, &circuit).expect("pk should not fail");
 
     let f = File::create("serialization-test.pk").unwrap();
     let mut writer = BufWriter::new(f);
@@ -143,7 +144,7 @@ fn main() {
     let f = File::open("serialization-test.pk").unwrap();
     let mut reader = BufReader::new(f);
     #[allow(clippy::unit_arg)]
-    let pk = ProvingKey::<G1Affine>::read::<_, StandardPlonk>(
+    let pk = ProvingKey::<G1Affine>::read::<_, StandardPlonk, ZK>(
         &mut reader,
         SerdeFormat::RawBytes,
         #[cfg(feature = "circuit-params")]
@@ -162,6 +163,7 @@ fn main() {
         _,
         Blake2bWrite<Vec<u8>, G1Affine, Challenge255<_>>,
         _,
+        ZK,
     >(
         &params,
         &pk,
@@ -181,6 +183,7 @@ fn main() {
         Challenge255<G1Affine>,
         Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
         SingleStrategy<'_, Bn256>,
+        ZK,
     >(
         &params,
         pk.get_vk(),

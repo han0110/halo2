@@ -474,6 +474,8 @@ mod tests {
 
     #[test]
     fn not_enough_columns_for_constants() {
+        const ZK: bool = true;
+
         struct MyCircuit {}
 
         impl Circuit<vesta::Scalar> for MyCircuit {
@@ -513,7 +515,7 @@ mod tests {
 
         let circuit = MyCircuit {};
         assert!(matches!(
-            MockProver::run(3, &circuit, vec![]).unwrap_err(),
+            MockProver::run::<_, ZK>(3, &circuit, vec![]).unwrap_err(),
             Error::NotEnoughColumnsForConstants,
         ));
     }

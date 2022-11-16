@@ -98,7 +98,7 @@ where
     /// Checks that field elements are less than modulus, and then checks that the point is on the curve.
     /// - `RawBytesUnchecked`: Reads an uncompressed curve element with coordinates in Montgomery form;
     /// does not perform any checks
-    pub fn read<R: io::Read, ConcreteCircuit: Circuit<C::Scalar>>(
+    pub fn read<R: io::Read, ConcreteCircuit: Circuit<C::Scalar>, const ZK: bool>(
         reader: &mut R,
         format: SerdeFormat,
         #[cfg(feature = "circuit-params")] params: ConcreteCircuit::Params,
@@ -106,7 +106,7 @@ where
         let mut k = [0u8; 4];
         reader.read_exact(&mut k)?;
         let k = u32::from_be_bytes(k);
-        let (domain, cs, _) = keygen::create_domain::<C, ConcreteCircuit>(
+        let (domain, cs, _) = keygen::create_domain::<C, ConcreteCircuit, ZK>(
             k,
             #[cfg(feature = "circuit-params")]
             params,
@@ -133,9 +133,9 @@ where
                 Ok(selector)
             })
             .collect::<io::Result<_>>()?;
-        let (cs, _) = cs.compress_selectors(selectors.clone());
+        let (cs, _) = cs.compress_selectors::<ZK>(selectors.clone());
 
-        Ok(Self::from_parts(
+        Ok(Self::from_parts::<ZK>(
             domain,
             fixed_commitments,
             permutation,
@@ -152,12 +152,12 @@ where
     }
 
     /// Reads a verification key from a slice of bytes using [`Self::read`].
-    pub fn from_bytes<ConcreteCircuit: Circuit<C::Scalar>>(
+    pub fn from_bytes<ConcreteCircuit: Circuit<C::Scalar>, const ZK: bool>(
         mut bytes: &[u8],
         format: SerdeFormat,
         #[cfg(feature = "circuit-params")] params: ConcreteCircuit::Params,
     ) -> io::Result<Self> {
-        Self::read::<_, ConcreteCircuit>(
+        Self::read::<_, ConcreteCircuit, ZK>(
             &mut bytes,
             format,
             #[cfg(feature = "circuit-params")]
@@ -181,7 +181,7 @@ where
                     .unwrap_or(0))
     }
 
-    fn from_parts(
+    fn from_parts<const ZK: bool>(
         domain: EvaluationDomain<C::Scalar>,
         fixed_commitments: Vec<C>,
         permutation: permutation::VerifyingKey<C>,
@@ -189,7 +189,7 @@ where
         selectors: Vec<Vec<bool>>,
     ) -> Self {
         // Compute cached values.
-        let cs_degree = cs.degree();
+        let cs_degree = cs.degree::<ZK>();
 
         let mut vk = Self {
             domain,
@@ -343,12 +343,12 @@ where
     /// Checks that field elements are less than modulus, and then checks that the point is on the curve.
     /// - `RawBytesUnchecked`: Reads an uncompressed curve element with coordinates in Montgomery form;
     /// does not perform any checks
-    pub fn read<R: io::Read, ConcreteCircuit: Circuit<C::Scalar>>(
+    pub fn read<R: io::Read, ConcreteCircuit: Circuit<C::Scalar>, const ZK: bool>(
         reader: &mut R,
         format: SerdeFormat,
         #[cfg(feature = "circuit-params")] params: ConcreteCircuit::Params,
     ) -> io::Result<Self> {
-        let vk = VerifyingKey::<C>::read::<R, ConcreteCircuit>(
+        let vk = VerifyingKey::<C>::read::<R, ConcreteCircuit, ZK>(
             reader,
             format,
             #[cfg(feature = "circuit-params")]
@@ -383,12 +383,12 @@ where
     }
 
     /// Reads a proving key from a slice of bytes using [`Self::read`].
-    pub fn from_bytes<ConcreteCircuit: Circuit<C::Scalar>>(
+    pub fn from_bytes<ConcreteCircuit: Circuit<C::Scalar>, const ZK: bool>(
         mut bytes: &[u8],
         format: SerdeFormat,
         #[cfg(feature = "circuit-params")] params: ConcreteCircuit::Params,
     ) -> io::Result<Self> {
-        Self::read::<_, ConcreteCircuit>(
+        Self::read::<_, ConcreteCircuit, ZK>(
             &mut bytes,
             format,
             #[cfg(feature = "circuit-params")]

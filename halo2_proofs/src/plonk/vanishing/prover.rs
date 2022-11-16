@@ -42,44 +42,52 @@ impl<C: CurveAffine> Argument<C> {
         E: EncodedChallenge<C>,
         R: RngCore,
         T: TranscriptWrite<C, E>,
+        const ZK: bool,
     >(
         params: &P,
         domain: &EvaluationDomain<C::Scalar>,
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
-        // Sample a random polynomial of degree n - 1
-        let n = 1usize << domain.k() as usize;
-        let chunk_size = (n as f64 / current_num_threads() as f64).ceil() as usize;
-        let num_chunks = (n as f64 / chunk_size as f64).ceil() as usize;
-        let mut rand_vec = vec![C::Scalar::ZERO; n];
+        let mut random_poly = domain.empty_coeff();
 
-        let mut thread_seeds: Vec<ChaCha20Rng> = (0..num_chunks)
-            .into_iter()
-            .map(|_| {
-                let mut seed = [0u8; 32];
-                rng.fill_bytes(&mut seed);
-                ChaCha20Rng::from_seed(seed)
-            })
-            .collect();
+        if ZK {
+            // Sample a random polynomial of degree n - 1
+            let n = 1usize << domain.k() as usize;
+            let chunk_size = (n as f64 / current_num_threads() as f64).ceil() as usize;
+            let num_chunks = (n as f64 / chunk_size as f64).ceil() as usize;
 
-        thread_seeds
-            .par_iter_mut()
-            .zip_eq(rand_vec.par_chunks_mut(chunk_size))
-            .for_each(|(mut rng, chunk)| {
-                chunk
-                    .iter_mut()
-                    .for_each(|v| *v = C::Scalar::random(&mut rng))
-            });
+            let mut thread_seeds: Vec<ChaCha20Rng> = (0..num_chunks)
+                .into_iter()
+                .map(|_| {
+                    let mut seed = [0u8; 32];
+                    rng.fill_bytes(&mut seed);
+                    ChaCha20Rng::from_seed(seed)
+                })
+                .collect();
 
-        let random_poly: Polynomial<C::Scalar, Coeff> = domain.coeff_from_vec(rand_vec);
+            thread_seeds
+                .par_iter_mut()
+                .zip_eq(random_poly.par_chunks_mut(chunk_size))
+                .for_each(|(mut rng, chunk)| {
+                    chunk
+                        .iter_mut()
+                        .for_each(|v| *v = C::Scalar::random(&mut rng))
+                });
+        }
 
-        // Sample a random blinding factor
-        let random_blind = Blind(C::Scalar::random(rng));
+        let random_blind = if ZK {
+            // Sample a random blinding factor
+            Blind(C::Scalar::random(rng))
+        } else {
+            Blind::default()
+        };
 
         // Commit
-        let c = params.commit(&random_poly, random_blind).to_affine();
-        transcript.write_point(c)?;
+        if ZK {
+            let c = params.commit(&random_poly, random_blind).to_affine();
+            transcript.write_point(c)?;
+        }
 
         Ok(Committed {
             random_poly,
@@ -144,7 +152,11 @@ impl<C: CurveAffine> Committed<C> {
 }
 
 impl<C: CurveAffine> Constructed<C> {
-    pub(in crate::plonk) fn evaluate<E: EncodedChallenge<C>, T: TranscriptWrite<C, E>>(
+    pub(in crate::plonk) fn evaluate<
+        E: EncodedChallenge<C>,
+        T: TranscriptWrite<C, E>,
+        const ZK: bool,
+    >(
         self,
         x: ChallengeX<C>,
         xn: C::Scalar,
@@ -163,8 +175,10 @@ impl<C: CurveAffine> Constructed<C> {
             .rev()
             .fold(Blind(C::Scalar::ZERO), |acc, eval| acc * Blind(xn) + *eval);
 
-        let random_eval = eval_polynomial(&self.committed.random_poly, *x);
-        transcript.write_scalar(random_eval)?;
+        if ZK {
+            let random_eval = eval_polynomial(&self.committed.random_poly, *x);
+            transcript.write_scalar(random_eval)?;
+        }
 
         Ok(Evaluated {
             h_poly,
@@ -175,7 +189,7 @@ impl<C: CurveAffine> Constructed<C> {
 }
 
 impl<C: CurveAffine> Evaluated<C> {
-    pub(in crate::plonk) fn open(
+    pub(in crate::plonk) fn open<const ZK: bool>(
         &self,
         x: ChallengeX<C>,
     ) -> impl Iterator<Item = ProverQuery<'_, C>> + Clone {
@@ -185,10 +199,14 @@ impl<C: CurveAffine> Evaluated<C> {
                 poly: &self.h_poly,
                 blind: self.h_blind,
             }))
-            .chain(Some(ProverQuery {
-                point: *x,
-                poly: &self.committed.random_poly,
-                blind: self.committed.random_blind,
-            }))
+            .chain(if ZK {
+                Some(ProverQuery {
+                    point: *x,
+                    poly: &self.committed.random_poly,
+                    blind: self.committed.random_blind,
+                })
+            } else {
+                None
+            })
     }
 }
