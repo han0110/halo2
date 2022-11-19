@@ -379,6 +379,11 @@ impl Selector {
         region.enable_selector(|| "", self, offset)
     }
 
+    /// Doc 
+    pub fn index(&self) -> usize {
+        self.0
+    }
+
     /// Is this selector "simple"? Simple selectors can only be multiplied
     /// by expressions that contain no other simple selectors.
     pub fn is_simple(&self) -> bool {
@@ -1969,6 +1974,11 @@ impl<F: Field> ConstraintSystem<F> {
                 // permutation polynomial between the roles of l_last, l_0
                 // and the interstitial values.)
             + 1 // for at least one row
+    }
+
+    /// Returns number of selectors
+    pub fn num_selectors(&self) -> usize {
+        self.num_selectors
     }
 
     /// Returns number of fixed columns
