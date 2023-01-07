@@ -5,6 +5,7 @@ use crate::{
     arithmetic::{best_fft, parallelize},
     plonk::Assigned,
 };
+use ark_std::{end_timer, start_timer};
 
 use super::{Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation};
 use ff::WithSmallOrderMulGroup;
@@ -226,8 +227,12 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
     pub fn lagrange_to_coeff(&self, mut a: Polynomial<F, LagrangeCoeff>) -> Polynomial<F, Coeff> {
         assert_eq!(a.values.len(), 1 << self.k);
 
+        let timer = start_timer!(|| "ifft");
+
         // Perform inverse FFT to obtain the polynomial in coefficient form
         Self::ifft(&mut a.values, self.omega_inv, self.k, self.ifft_divisor);
+
+        end_timer!(timer);
 
         Polynomial {
             values: a.values,
@@ -243,9 +248,13 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
     ) -> Polynomial<F, ExtendedLagrangeCoeff> {
         assert_eq!(a.values.len(), 1 << self.k);
 
+        let timer = start_timer!(|| "fft");
+
         self.distribute_powers_zeta(&mut a.values, true);
         a.values.resize(self.extended_len(), F::ZERO);
         best_fft(&mut a.values, self.extended_omega, self.extended_k);
+
+        end_timer!(timer);
 
         Polynomial {
             values: a.values,
@@ -281,6 +290,8 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
     pub fn extended_to_coeff(&self, mut a: Polynomial<F, ExtendedLagrangeCoeff>) -> Vec<F> {
         assert_eq!(a.values.len(), self.extended_len());
 
+        let timer = start_timer!(|| "ifft");
+
         // Inverse FFT
         Self::ifft(
             &mut a.values,
@@ -298,6 +309,8 @@ impl<F: WithSmallOrderMulGroup<3>> EvaluationDomain<F> {
         // it always lies on a power-of-two boundary.
         a.values
             .truncate((&self.n * self.quotient_poly_degree) as usize);
+
+        end_timer!(timer);
 
         a.values
     }

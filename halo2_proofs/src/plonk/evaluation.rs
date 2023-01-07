@@ -11,6 +11,7 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use ark_std::{end_timer, start_timer};
 use group::prime::PrimeCurve;
 use group::{
     ff::{BatchInvert, Field, PrimeField, WithSmallOrderMulGroup},
@@ -332,6 +333,8 @@ impl<C: CurveAffine> Evaluator<C> {
             .zip(lookups.iter())
             .zip(permutations.iter())
         {
+            let timer = start_timer!(|| "quotient_polys");
+
             // Custom gates
             multicore::scope(|scope| {
                 let chunk_size = (size + num_threads - 1) / num_threads;
@@ -465,6 +468,8 @@ impl<C: CurveAffine> Evaluator<C> {
                 });
             }
 
+            end_timer!(timer);
+
             // Lookups
             for (n, lookup) in lookups.iter().enumerate() {
                 // Polynomials required for this lookup.
@@ -479,6 +484,8 @@ impl<C: CurveAffine> Evaluator<C> {
                     .vk
                     .domain
                     .coeff_to_extended(lookup.permuted_table_poly.clone());
+
+                let timer = start_timer!(|| "quotient_polys");
 
                 // Lookup constraints
                 parallelize(&mut values, |values, start| {
@@ -554,6 +561,8 @@ impl<C: CurveAffine> Evaluator<C> {
                             };
                     }
                 });
+
+                end_timer!(timer);
             }
         }
         values

@@ -32,6 +32,7 @@ use crate::{
     poly::batch_invert_assigned,
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use ark_std::{end_timer, start_timer};
 use group::prime::PrimeCurveAffine;
 
 /// This creates a proof for the provided `circuit` when given the public
@@ -289,6 +290,7 @@ where
     }
 
     let (advice, challenges) = {
+        let timer = start_timer!(|| "witness_collector");
         let mut advice = vec![
             AdviceSingle::<Scheme::Curve, LagrangeCoeff> {
                 advice_polys: vec![domain.empty_lagrange(); meta.num_advice_columns],
@@ -297,9 +299,11 @@ where
             instances.len()
         ];
         let mut challenges = HashMap::<usize, Scheme::Scalar>::with_capacity(meta.num_challenges);
+        end_timer!(timer);
 
         let unusable_rows_start = meta.usable_rows::<ZK>(params.n() as usize).end;
         for current_phase in pk.vk.cs.phases() {
+            let timer = start_timer!(|| "witness_collector");
             let column_indices = meta
                 .advice_column_phase
                 .iter()
@@ -312,10 +316,12 @@ where
                     }
                 })
                 .collect::<BTreeSet<_>>();
+            end_timer!(timer);
 
             for ((circuit, advice), instances) in
                 circuits.iter().zip(advice.iter_mut()).zip(instances)
             {
+                let timer = start_timer!(|| "witness_collector");
                 let mut witness = WitnessCollection {
                     k: params.k(),
                     current_phase,
@@ -361,6 +367,8 @@ where
                         }
                     }
                 }
+
+                end_timer!(timer);
 
                 // Compute commitments to advice column polynomials
                 let blinds: Vec<_> = advice_values
@@ -532,6 +540,8 @@ where
     let x: ChallengeX<_> = transcript.squeeze_challenge_scalar();
     let xn = x.pow(&[params.n() as u64, 0, 0, 0]);
 
+    let timer = start_timer!(|| "evals");
+
     if P::QUERY_INSTANCE {
         // Compute and hash instance evals for each circuit instance
         for instance in instance.iter() {
@@ -662,8 +672,15 @@ where
         // We query the h(X) polynomial at x
         .chain(vanishing.open::<ZK>(x));
 
+    end_timer!(timer);
+    let timer = start_timer!(|| "pcs_batch_open");
+
     let prover = P::new(params);
-    prover
+    let output = prover
         .create_proof(rng, transcript, instances)
-        .map_err(|_| Error::ConstraintSystemFailure)
+        .map_err(|_| Error::ConstraintSystemFailure);
+
+    end_timer!(timer);
+
+    output
 }

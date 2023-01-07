@@ -2,6 +2,7 @@
 //! field and polynomial arithmetic.
 
 use super::multicore;
+use ark_std::{end_timer, start_timer};
 pub use ff::Field;
 use group::{
     ff::{BatchInvert, PrimeField},
@@ -147,8 +148,10 @@ pub fn small_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::C
 pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     assert_eq!(coeffs.len(), bases.len());
 
+    let timer = start_timer!(|| format!("variable_base_msm-{}", coeffs.len()));
+
     let num_threads = multicore::current_num_threads();
-    if coeffs.len() > num_threads {
+    let result = if coeffs.len() > num_threads {
         let chunk = coeffs.len() / num_threads;
         let num_chunks = coeffs.chunks(chunk).len();
         let mut results = vec![C::Curve::identity(); num_chunks];
@@ -170,7 +173,11 @@ pub fn best_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cu
         let mut acc = C::Curve::identity();
         multiexp_serial(coeffs, bases, &mut acc);
         acc
-    }
+    };
+
+    end_timer!(timer);
+
+    result
 }
 
 /// Performs a radix-$2$ Fast-Fourier Transformation (FFT) on a vector of size

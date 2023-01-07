@@ -13,6 +13,7 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use ark_std::{end_timer, start_timer};
 use ff::WithSmallOrderMulGroup;
 use group::{
     ff::{BatchInvert, Field},
@@ -88,6 +89,8 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
         C: CurveAffine<ScalarExt = F>,
         C::Curve: Mul<F, Output = C::Curve> + MulAssign<F>,
     {
+        let timer = start_timer!(|| "lookup_permuted_polys");
+
         // Closure to get values of expressions and compress them
         let compress_expressions = |expressions: &[Expression<C::Scalar>]| {
             let compressed_expression = expressions
@@ -125,6 +128,8 @@ impl<F: WithSmallOrderMulGroup<3>> Argument<F> {
                 &compressed_input_expression,
                 &compressed_table_expression,
             )?;
+
+        end_timer!(timer);
 
         // Closure to construct commitment to vector of values
         let mut commit_values = |values: &Polynomial<C::Scalar, LagrangeCoeff>| {
@@ -183,6 +188,8 @@ impl<C: CurveAffine> Permuted<C> {
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Committed<C>, Error> {
+        let timer = start_timer!(|| "lookup_z_polys");
+
         let blinding_factors = pk.vk.cs.blinding_factors::<ZK>();
         // Goal is to compute the products of fractions
         //
@@ -290,6 +297,8 @@ impl<C: CurveAffine> Permuted<C> {
             // case this z[u] value will be zero. (bad!)
             assert_eq!(z[u % params.n() as usize], C::Scalar::ONE);
         }
+
+        end_timer!(timer);
 
         let product_blind = Blind(C::Scalar::random(rng));
         let product_commitment = params.commit_lagrange(&z, product_blind).to_affine();

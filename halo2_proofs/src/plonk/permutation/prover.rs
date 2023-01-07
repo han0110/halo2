@@ -18,6 +18,7 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use ark_std::{end_timer, start_timer};
 
 pub(crate) struct CommittedSet<C: CurveAffine> {
     pub(crate) permutation_product_poly: Polynomial<C::Scalar, Coeff>,
@@ -91,6 +92,7 @@ impl Argument {
             .chunks(chunk_len)
             .zip(pkey.permutations.chunks(chunk_len))
         {
+            let timer = start_timer!(|| "permutation_z_polys");
             // Goal is to compute the products of fractions
             //
             // (p_j(\omega^i) + \delta^j \omega^i \beta + \gamma) /
@@ -175,6 +177,8 @@ impl Argument {
                 // Set new last_z
                 last_z = *z.last().unwrap() * modified_values.last().unwrap();
             }
+
+            end_timer!(timer);
 
             let blind = Blind(C::Scalar::random(&mut rng));
 

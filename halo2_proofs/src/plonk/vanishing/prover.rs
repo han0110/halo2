@@ -17,6 +17,7 @@ use crate::{
     },
     transcript::{EncodedChallenge, TranscriptWrite},
 };
+use ark_std::{end_timer, start_timer};
 
 pub(in crate::plonk) struct Committed<C: CurveAffine> {
     random_poly: Polynomial<C::Scalar, Coeff>,
@@ -111,8 +112,10 @@ impl<C: CurveAffine> Committed<C> {
         mut rng: R,
         transcript: &mut T,
     ) -> Result<Constructed<C>, Error> {
+        let timer = start_timer!(|| "quotient_polys");
         // Divide by t(X) = X^{params.n} - 1.
         let h_poly = domain.divide_by_vanishing_poly(h_poly);
+        end_timer!(timer);
 
         // Obtain final h(X) polynomial
         let h_poly = domain.extended_to_coeff(h_poly);
