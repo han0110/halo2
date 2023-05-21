@@ -15,8 +15,8 @@ use super::{
         Advice, Any, Assignment, Challenge, Circuit, Column, ConstraintSystem, FirstPhase, Fixed,
         FloorPlanner, Instance, Selector,
     },
-    lookup, permutation, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
-    ChallengeY, Error, Expression, ProvingKey,
+    lookup, permutation, shuffle, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta,
+    ChallengeX, ChallengeY, Error, Expression, ProvingKey,
 };
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine},
@@ -436,6 +436,30 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let shuffles = instance
+        .iter()
+        .zip(advice.iter())
+        .map(|(instance, advice)| -> Vec<_> {
+            // Compress expressions for each shuffle
+            pk.vk
+                .cs
+                .shuffles
+                .iter()
+                .map(|shuffle| {
+                    shuffle.compress(
+                        pk,
+                        params,
+                        domain,
+                        theta,
+                        &advice.advice_polys,
+                        &pk.fixed_values,
+                        &instance.instance_values,
+                        &challenges,
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+
     // Sample beta challenge
     let beta: ChallengeBeta<_> = transcript.squeeze_challenge_scalar();
 
@@ -469,6 +493,17 @@ where
             lookups
                 .into_iter()
                 .map(|lookup| lookup.commit_product(pk, params, beta, gamma, &mut rng, transcript))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let shuffles: Vec<Vec<shuffle::prover::Committed<Scheme::Curve>>> = shuffles
+        .into_iter()
+        .map(|shuffles| -> Result<Vec<_>, _> {
+            // Construct and commit to products for each shuffle
+            shuffles
+                .into_iter()
+                .map(|shuffle| shuffle.commit_product(pk, params, gamma, &mut rng, transcript))
                 .collect::<Result<Vec<_>, _>>()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -515,6 +550,7 @@ where
         *gamma,
         *theta,
         &lookups,
+        &shuffles,
         &permutations,
     );
 
@@ -602,12 +638,24 @@ where
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Evaluate the shuffles, if any, at omega^i x.
+    let shuffles: Vec<Vec<shuffle::prover::Evaluated<Scheme::Curve>>> = shuffles
+        .into_iter()
+        .map(|shuffles| -> Result<Vec<_>, _> {
+            shuffles
+                .into_iter()
+                .map(|p| p.evaluate(pk, x, transcript))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     let instances = instance
         .iter()
         .zip(advice.iter())
         .zip(permutations.iter())
         .zip(lookups.iter())
-        .flat_map(|(((instance, advice), permutation), lookups)| {
+        .zip(shuffles.iter())
+        .flat_map(|((((instance, advice), permutation), lookups), shuffles)| {
             iter::empty()
                 .chain(
                     P::QUERY_INSTANCE
@@ -634,6 +682,7 @@ where
                 )
                 .chain(permutation.open(pk, x))
                 .chain(lookups.iter().flat_map(move |p| p.open(pk, x)).into_iter())
+                .chain(shuffles.iter().flat_map(move |p| p.open(pk, x)).into_iter())
         })
         .chain(
             pk.vk
