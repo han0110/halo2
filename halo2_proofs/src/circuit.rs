@@ -94,6 +94,28 @@ pub struct Cell {
     column: Column<Any>,
 }
 
+impl Cell {
+    /// Returns row_offset.
+    pub fn row_offset(&self) -> usize {
+        self.row_offset
+    }
+
+    /// Returns column.
+    pub fn column(&self) -> Column<Any> {
+        self.column
+    }
+}
+
+impl From<(RegionIndex, usize, Column<Any>)> for Cell {
+    fn from((region_index, row_offset, column): (RegionIndex, usize, Column<Any>)) -> Self {
+        Self {
+            region_index,
+            row_offset,
+            column,
+        }
+    }
+}
+
 /// An assigned cell.
 #[derive(Clone, Debug)]
 pub struct AssignedCell<V, F: Field> {
