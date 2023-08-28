@@ -242,6 +242,11 @@ impl<C: CurveAffine> VerifyingKey<C> {
     pub fn cs(&self) -> &ConstraintSystem<C::Scalar> {
         &self.cs
     }
+
+    /// Returns representative of this `VerifyingKey` in transcripts
+    pub fn transcript_repr(&self) -> C::Scalar {
+        self.transcript_repr
+    }
 }
 
 /// Minimal representation of a verification key that can be used to identify
