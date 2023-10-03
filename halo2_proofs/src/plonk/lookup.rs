@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::circuit::Expression;
 use ff::Field;
 use std::fmt::{self, Debug};

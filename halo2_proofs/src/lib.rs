@@ -19,3 +19,12 @@ pub mod transcript;
 pub mod dev;
 mod helpers;
 pub use helpers::SerdeFormat;
+
+#[cfg(feature = "counter")]
+use std::{collections::BTreeMap, sync::Mutex};
+#[cfg(feature = "counter")]
+lazy_static::lazy_static! {
+
+    static ref FFT_COUNTER: Mutex<BTreeMap<usize, usize>> = Mutex::new(BTreeMap::new());
+    static ref MSM_COUNTER: Mutex<BTreeMap<usize, usize>> = Mutex::new(BTreeMap::new());
+}
