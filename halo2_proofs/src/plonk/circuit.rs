@@ -1795,13 +1795,9 @@ impl<F: Field> ConstraintSystem<F> {
             .max()
             .unwrap();
 
-        let required_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
-        let required_degree = (required_degree as u64 - 1).next_power_of_two() as usize;
-
-        self.set_minimum_degree(required_degree + 1);
-
-        // safe to unwrap here
-        let minimum_degree = self.minimum_degree.unwrap();
+        let minimum_degree = std::cmp::max(max_gate_degree, max_single_lookup_degree);
+        // TODO: Find the best degree that needs least commitment
+        // let minimum_degree = (minimum_degree as u64 - 1).next_power_of_two() as usize + 1;
 
         let mut lookups: Vec<_> = vec![];
         for v in self.lookups_map.values() {
