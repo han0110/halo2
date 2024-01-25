@@ -1,0 +1,16 @@
+[package]
+name = "halo2_alt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+halo2_proofs = { path = "../halo2_proofs" }
+rand_core = { version = "0.6", default-features = false }
+rayon = "1.8"
+blake2b_simd = "1"
+
+[dev-dependencies]
+rand_chacha = "0.3"
+
+[features]
+sanity-checks = []

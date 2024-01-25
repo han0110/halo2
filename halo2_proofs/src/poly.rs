@@ -69,6 +69,21 @@ pub struct Polynomial<F, B> {
     _marker: PhantomData<B>,
 }
 
+impl<F, B> Polynomial<F, B> {
+    /// Returns a `Polynomial`
+    pub fn new(values: Vec<F>) -> Self {
+        Self {
+            values,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns `values`
+    pub fn into_vec(self) -> Vec<F> {
+        self.values
+    }
+}
+
 impl<F, B> Index<usize> for Polynomial<F, B> {
     type Output = F;
 
@@ -175,7 +190,8 @@ impl<F: SerdePrimeField, B> Polynomial<F, B> {
     }
 }
 
-pub(crate) fn batch_invert_assigned<F: Field>(
+///  Batch invert `Vec<Polynomial<Assigned<F>, LagrangeCoeff>>` into `Vec<Polynomial<F, LagrangeCoeff>>`
+pub fn batch_invert_assigned<F: Field>(
     assigned: Vec<Polynomial<Assigned<F>, LagrangeCoeff>>,
 ) -> Vec<Polynomial<F, LagrangeCoeff>> {
     let mut assigned_denominators: Vec<_> = assigned
