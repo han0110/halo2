@@ -41,7 +41,7 @@ where
     //       the methods might contain one that takes `protocol` and return a diff to protocol to
     //       be merged later, and the other takes `(phase, values)` and returns some witnesses.
     lookups: Vec<LogUp<F>>,
-    permutation: ZigZagPermutation<F>,
+    permutation: Option<ZigZagPermutation<F>>,
 }
 
 impl<F, C> FflonkCircuit<F, C>
@@ -93,7 +93,7 @@ where
                 }
             })
             .collect::<Vec<_>>();
-        let permutation = {
+        let permutation = (!permutation_columns.is_empty()).then(|| {
             let chunk_size = cs.degree() - 2;
             let inputs = permutation_columns
                 .iter()
@@ -116,7 +116,7 @@ where
                 beta,
                 omega: EvaluationDomain::new(1, k as u32).get_omega(),
             }
-        };
+        });
 
         let constraints = {
             let last_row = -(cs.blinding_factors() as i32 + 1);
@@ -129,19 +129,29 @@ where
                 lookups
                     .iter()
                     .flat_map(|lookup| lookup.constraints(l_0, l_last, l_active)),
-                permutation.constraints(l_0, l_last, l_active)
+                permutation
+                    .as_ref()
+                    .map(|permutation| permutation.constraints(l_0, l_last, l_active))
+                    .into_iter()
+                    .flatten()
             ]
             .collect::<Vec<_>>()
         };
 
-        let has_beta =
-            lookups.iter().any(|lookup| lookup.input.len() > 1) || !permutation.inputs.is_empty();
-        let phases = match (lookups.len(), permutation.zs.len()) {
-            (0, 0) => vec![(cs.num_advice_columns(), 0)],
-            (num_lookups, num_zs) => vec![
-                (cs.num_advice_columns() + num_lookups, 1 + has_beta as usize),
-                (num_lookups + num_zs, 0),
-            ],
+        let phases = {
+            let num_lookups = lookups.len();
+            let num_zs = permutation
+                .as_ref()
+                .map(|permutation| permutation.zs.len())
+                .unwrap_or_default();
+            let has_beta = lookups.iter().any(|lookup| lookup.input.len() > 1) || num_zs > 0;
+            match (num_lookups, num_zs) {
+                (0, 0) => vec![(cs.num_advice_columns(), 0)],
+                (num_lookups, num_zs) => vec![
+                    (cs.num_advice_columns() + num_lookups, 1 + has_beta as usize),
+                    (num_lookups + num_zs, 0),
+                ],
+            }
         };
 
         let protocol = Protocol {
@@ -234,9 +244,10 @@ where
             .map(|selectors| selectors.into_iter().map(felt_from_bool).collect());
         let permutations = self
             .permutation
-            .preprocess(n, collector.permutation.into_cycles());
+            .as_ref()
+            .map(|permutation| permutation.preprocess(n, collector.permutation.into_cycles()));
 
-        Ok(chain![fixeds, selectors, permutations].collect())
+        Ok(chain![fixeds, selectors, permutations.into_iter().flatten()].collect())
     }
 
     fn witness(
@@ -289,9 +300,10 @@ where
 
                 let zs = self
                     .permutation
-                    .witness_zs(n, &usable_rows, values, challenges);
+                    .as_ref()
+                    .map(|permutation| permutation.witness_zs(n, &usable_rows, values, challenges));
 
-                chain![phis, zs].collect()
+                chain![phis, zs.into_iter().flatten()].collect()
             }
             _ => unimplemented!(),
         };
@@ -442,8 +454,7 @@ impl<F: PrimeField> LogUp<F> {
             .collect::<Vec<_>>();
 
         let phi = chain![
-            sum.iter()
-                .scan(F::ZERO, |acc, sum| mem::replace(acc, *acc + sum).into()),
+            chain![sum, [F::ZERO]].scan(F::ZERO, |acc, item| mem::replace(acc, *acc + item).into()),
             iter::repeat(F::ZERO)
         ]
         .take(n)
@@ -561,20 +572,20 @@ impl<F: PrimeField> ZigZagPermutation<F> {
             self.permutations.chunks(self.chunk_size)
         )
         .map(|(chunk_idx, inputs, permutations)| {
-            let mut product = vec![F::ONE; n];
+            let mut product = vec![F::ONE; usable_rows.len()];
 
             izip!(inputs, permutations).for_each(|(input, permutation)| {
                 let input = values[*input];
                 let permutation = values[*permutation];
-                product[usable_rows.clone()]
+                product
                     .par_iter_mut()
-                    .enumerate()
-                    .for_each(|(row, product)| {
+                    .zip(usable_rows.clone())
+                    .for_each(|(product, row)| {
                         *product *= input[row] + beta * permutation[row] + gamma
                     });
             });
 
-            let par_chunk_size = div_ceil(usable_rows.len(), current_num_threads());
+            let par_chunk_size = div_ceil(product.len(), current_num_threads());
 
             product[usable_rows.clone()]
                 .par_chunks_mut(par_chunk_size)
@@ -587,7 +598,7 @@ impl<F: PrimeField> ZigZagPermutation<F> {
                 let input = values[*input];
                 product.par_chunks_mut(par_chunk_size).enumerate().for_each(
                     |(chunk_idx, product)| {
-                        let start = chunk_idx * par_chunk_size;
+                        let start = usable_rows.start + chunk_idx * par_chunk_size;
                         let mut beta_delta_omega = beta * delta * self.omega.pow([start as u64]);
                         izip!(start.., product).for_each(|(row, product)| {
                             *product *= input[row] + beta_delta_omega + gamma;
@@ -601,21 +612,13 @@ impl<F: PrimeField> ZigZagPermutation<F> {
         })
         .collect::<Vec<_>>();
 
-        let products = {
-            let mut products = Multizip::new(
-                products
-                    .iter()
-                    .map(|product| product[usable_rows.clone()].iter())
-                    .collect(),
-            );
-            iter::successors(Some(F::ONE), |state| {
-                products.next().map(|product| *state * product)
-            })
-            .collect::<Vec<_>>()
-        };
+        let products = Multizip::new(products.into_iter().map(Vec::into_iter).collect())
+            .chain([F::ZERO])
+            .scan(F::ONE, |acc, item| mem::replace(acc, *acc * item).into())
+            .collect::<Vec<_>>();
 
         if cfg!(feature = "sanity-checks") {
-            assert_eq!(products[self.zs.len() * usable_rows.end], F::ONE);
+            assert_eq!(*products.last().unwrap(), F::ONE);
         }
 
         let mut zs = vec![vec![F::ZERO; n]; self.zs.len()];
@@ -634,6 +637,7 @@ struct Multizip<T>(Vec<T>, Cycle<Range<usize>>);
 
 impl<T: Iterator> Multizip<T> {
     fn new(values: Vec<T>) -> Self {
+        assert_ne!(values.len(), 0);
         let ptr = (0..values.len()).cycle();
         Self(values, ptr)
     }
@@ -644,5 +648,10 @@ impl<T: Iterator> Iterator for Multizip<T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0[self.1.next().unwrap()].next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let exact = self.0[0].size_hint().0 * self.0.len();
+        (exact, Some(exact))
     }
 }
