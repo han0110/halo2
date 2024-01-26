@@ -14,3 +14,5 @@ rand_chacha = "0.3"
 
 [features]
 sanity-checks = []
+circuit-params = ["halo2_proofs/circuit-params"]
+derive_serde = ["halo2_proofs/derive_serde"]
