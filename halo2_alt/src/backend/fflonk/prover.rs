@@ -90,6 +90,10 @@ where
         advice_values.extend(values);
         advice_cosets.extend(cosets);
 
+        // FIXME: Currently there is no blinding factors for quotient polynomials, but in fflonk we
+        //        might have redudant rotated queries to quotient polynomials for verifier to
+        //        recover the actual evaluations of combined polynomials, which might break the
+        //        zero-knowledge property.
         let quotient_polys = {
             let dummy_coset = Polynomial::new(Vec::new());
             let polys = chain![
