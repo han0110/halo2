@@ -18,6 +18,7 @@ use halo2_proofs::{
 };
 use std::collections::{BTreeSet, HashMap};
 
+/// Verify a fflonk proof.
 pub fn verify_proof<'params, S, V, E, ST>(
     params: &'params S::ParamsVerifier,
     vk: &VerifyingKey<S::Curve>,
@@ -32,7 +33,7 @@ where
     E: EncodedChallenge<S::Curve>,
     ST: VerificationStrategy<'params, S, V>,
 {
-    if instances.len() != vk.protocol.num_instance_polys {
+    if instances.len() != vk.protocol.num_instance_polys() {
         return Err(Error::InvalidInstances);
     }
 
@@ -46,7 +47,7 @@ where
 
     let mut combined_commitments = vec![vk.preprocessed_commitment];
     let mut challenges = vec![];
-    for (_, num_challenges) in &vk.protocol.phases {
+    for (_, num_challenges) in vk.protocol.phases() {
         combined_commitments.push(transcript.read_point()?);
 
         for _ in 0..*num_challenges {
@@ -117,12 +118,12 @@ fn quotient_evals<C: CurveAffine>(
     let domain = &vk.domain;
     let poly_range = vk.protocol.poly_range();
 
-    let x_to_n = squares(x).nth(vk.protocol.k).unwrap();
+    let x_to_n = squares(x).nth(vk.protocol.k()).unwrap();
     let (lagrange_evals, instance_evals) = {
         let instances = izip!(poly_range.instance.clone(), instances).collect::<HashMap<_, _>>();
         let instance_queries = vk
             .protocol
-            .constraints
+            .constraints()
             .iter()
             .flat_map(Expression::used_query)
             .filter(|query| poly_range.instance.contains(&query.index))
@@ -145,7 +146,7 @@ fn quotient_evals<C: CurveAffine>(
         let i_s = chain![
             max_rotation..max_instance_len as i32 + min_rotation.abs(),
             vk.protocol
-                .constraints
+                .constraints()
                 .iter()
                 .flat_map(Expression::used_langrange),
         ]
@@ -186,7 +187,7 @@ fn quotient_evals<C: CurveAffine>(
                 .constraints
                 .iter()
                 .map(|idx| {
-                    vk.protocol.constraints[*idx].evaluate_felt(&|poly| match poly {
+                    vk.protocol.constraints()[*idx].evaluate_felt(&|poly| match poly {
                         Constant(constant) => constant,
                         Challenge(idx) => challenges[idx],
                         Identity => x,

@@ -1,5 +1,8 @@
 use crate::{
-    backend::{fflonk::keygen::query_infos, Circuit},
+    backend::{
+        fflonk::{keygen::query_infos, max_combined_poly_size},
+        Circuit,
+    },
     protocol::{Expression, PolynomialRef, Protocol},
     util::{
         chain, div_ceil, felt_from_bool,
@@ -26,6 +29,7 @@ use std::{
     ops::Range,
 };
 
+/// Wrapper for `halo2_proofs::plonk::Circuit` to fit `crate::backend::Circuit` abstraction.
 #[derive(Clone, Debug)]
 pub struct FflonkCircuit<F, C>
 where
@@ -50,6 +54,7 @@ where
     C: Debug + plonk::Circuit<F>,
     C::Config: Debug,
 {
+    /// Wraps `halo2_proofs::plonk::Circuit` to fit `crate::backend::Circuit` abstraction.
     pub fn new(k: usize, circuit: C) -> Self {
         let mut cs = ConstraintSystem::default();
         let circuit_config = C::configure(&mut cs);
@@ -154,13 +159,13 @@ where
             }
         };
 
-        let protocol = Protocol {
+        let protocol = Protocol::new(
             k,
             num_preprocessed_polys,
             num_instance_polys,
             phases,
             constraints,
-        };
+        );
 
         Self {
             circuit,
@@ -172,23 +177,12 @@ where
         }
     }
 
+    /// Returns minimum required `k` of public parameters.
     pub fn min_params_k(&self) -> usize {
         let (preprocessed_query_info, phase_infos) = query_infos(&self.protocol);
-        let max_combined_degree = chain![
-            [preprocessed_query_info.t],
-            phase_infos.iter().map(|phase_info| {
-                let max_degree = phase_info
-                    .constraints
-                    .iter()
-                    .map(|idx| self.protocol.constraints[*idx].degree().saturating_sub(1))
-                    .max()
-                    .unwrap_or(1);
-                phase_info.t * max_degree
-            })
-        ]
-        .max()
-        .unwrap();
-        self.protocol.k + log2_ceil(max_combined_degree)
+        let max_combined_poly_size =
+            max_combined_poly_size(&self.protocol, &preprocessed_query_info, &phase_infos);
+        log2_ceil(max_combined_poly_size)
     }
 }
 
@@ -222,7 +216,7 @@ where
     fn preprocess(&self) -> Result<Vec<Vec<F>>, Error> {
         let n = self.protocol.n();
         let mut collector = PreprocessCollector {
-            k: self.protocol.k as u32,
+            k: self.protocol.k() as u32,
             fixeds: vec![vec![F::ZERO.into(); n]; self.cs.num_fixed_columns()],
             permutation: Permutation::new(self.cs.permutation().get_columns()),
             selectors: vec![vec![false; n]; self.cs.num_selectors()],
@@ -264,7 +258,7 @@ where
         let mut values = match phase {
             0 => {
                 let mut collector = WitnessCollector {
-                    k: self.protocol.k as u32,
+                    k: self.protocol.k() as u32,
                     phase: phase as u8,
                     instance_values: &values[self.protocol.poly_range().instance],
                     advices: vec![vec![F::ZERO.into(); n]; self.cs.num_advice_columns()],

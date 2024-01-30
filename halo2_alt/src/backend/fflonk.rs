@@ -1,3 +1,7 @@
+//! Implementation of [fflonk] proof system.
+//!
+//! [fflonk]: https://eprint.iacr.org/2021/1167
+
 use crate::{
     protocol::Protocol,
     util::{chain, div_ceil, evaluator::Evaluator, izip, lcm, root_of_unity},
@@ -19,13 +23,17 @@ mod keygen;
 mod prover;
 mod verifier;
 
+#[cfg(test)]
+mod test;
+
 pub use circuit::FflonkCircuit;
 pub use keygen::{keygen_pk, keygen_vk};
 pub use prover::create_proof;
 pub use verifier::verify_proof;
 
+/// Query information of a phase.
 #[derive(Clone, Debug)]
-struct QueryInfo<F> {
+pub struct QueryInfo<F> {
     num_polys: usize,
     t: usize,
     omega_t: F,
@@ -65,8 +73,9 @@ impl<F: PrimeField> QueryInfo<F> {
     }
 }
 
+/// Query information and constraint indices of a phase.
 #[derive(Clone, Debug)]
-struct PhaseInfo<F> {
+pub struct PhaseInfo<F> {
     query_info: QueryInfo<F>,
     constraints: Vec<usize>,
 }
@@ -88,6 +97,7 @@ impl<F: PrimeField> PhaseInfo<F> {
     }
 }
 
+/// Verifying key of fflonk.
 #[derive(Debug)]
 pub struct VerifyingKey<C: CurveAffine> {
     domain: EvaluationDomain<C::Scalar>,
@@ -109,7 +119,7 @@ impl<C: CurveAffine> VerifyingKey<C> {
         C::Scalar: FromUniformBytes<64>,
     {
         let mut vk = Self {
-            domain: EvaluationDomain::new(protocol.degree() as u32, protocol.k as u32),
+            domain: protocol.domain(),
             protocol,
             preprocessed_query_info,
             preprocessed_commitment,
@@ -134,7 +144,37 @@ impl<C: CurveAffine> VerifyingKey<C> {
         vk
     }
 
-    pub fn hash_into<E: EncodedChallenge<C>, T: Transcript<C, E>>(
+    /// Returns `EvaluationDomain`.
+    pub fn domain(&self) -> &EvaluationDomain<C::Scalar> {
+        &self.domain
+    }
+
+    /// Returns `Protocol`.
+    pub fn protocol(&self) -> &Protocol<C::Scalar> {
+        &self.protocol
+    }
+
+    /// Returns preprocessed commitment.
+    pub fn preprocessed_commitment(&self) -> &C {
+        &self.preprocessed_commitment
+    }
+
+    /// Returns preprocessed `QueryInfo`.
+    pub fn preprocessed_query_info(&self) -> &QueryInfo<C::Scalar> {
+        &self.preprocessed_query_info
+    }
+
+    /// Returns `PhaseInfo` of phases.
+    pub fn phase_infos(&self) -> &[PhaseInfo<C::Scalar>] {
+        &self.phase_infos
+    }
+
+    /// Returns transcript representation of this `VerifyingKey`.
+    pub fn transcript_repr(&self) -> &C::Scalar {
+        &self.transcript_repr
+    }
+
+    fn hash_into<E: EncodedChallenge<C>, T: Transcript<C, E>>(
         &self,
         transcript: &mut T,
     ) -> io::Result<()> {
@@ -155,6 +195,14 @@ impl<C: CurveAffine> VerifyingKey<C> {
             .unwrap()
     }
 
+    fn max_combined_poly_size(&self) -> usize {
+        max_combined_poly_size(
+            &self.protocol,
+            &self.preprocessed_query_info,
+            &self.phase_infos,
+        )
+    }
+
     fn pinned(&self) -> PinnedVerificationKey<C> {
         PinnedVerificationKey {
             base_modulus: C::Base::MODULUS,
@@ -168,6 +216,7 @@ impl<C: CurveAffine> VerifyingKey<C> {
     }
 }
 
+/// Proving key of fflonk.
 #[derive(Debug)]
 pub struct ProvingKey<C: CurveAffine> {
     vk: VerifyingKey<C>,
@@ -178,9 +227,16 @@ pub struct ProvingKey<C: CurveAffine> {
     evaluators: Vec<Vec<Evaluator<C::Scalar>>>,
 }
 
+impl<C: CurveAffine> ProvingKey<C> {
+    /// Returns verifying key.
+    pub fn vk(&self) -> &VerifyingKey<C> {
+        &self.vk
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct PinnedVerificationKey<'a, C: CurveAffine> {
+struct PinnedVerificationKey<'a, C: CurveAffine> {
     base_modulus: &'static str,
     scalar_modulus: &'static str,
     domain: PinnedEvaluationDomain<'a, C::Scalar>,
@@ -188,6 +244,28 @@ pub struct PinnedVerificationKey<'a, C: CurveAffine> {
     preprocessed_commitment: &'a C,
     preprocessed_query_info: &'a QueryInfo<C::Scalar>,
     phase_infos: &'a [PhaseInfo<C::Scalar>],
+}
+
+fn max_combined_poly_size<F>(
+    protocol: &Protocol<F>,
+    preprocessed_query_info: &QueryInfo<F>,
+    phase_infos: &[PhaseInfo<F>],
+) -> usize {
+    let max_combined_degree = chain![
+        [preprocessed_query_info.t],
+        phase_infos.iter().map(|phase_info| {
+            let max_degree = phase_info
+                .constraints
+                .iter()
+                .map(|idx| protocol.constraints()[*idx].degree().saturating_sub(1))
+                .max()
+                .unwrap_or(1);
+            phase_info.t * max_degree
+        })
+    ]
+    .max()
+    .unwrap();
+    max_combined_degree << protocol.k()
 }
 
 fn combine_polys<'a, F: Field>(
@@ -202,11 +280,17 @@ fn combine_polys<'a, F: Field>(
         .max()
         .unwrap_or_default()
         * t;
-    let mut combined = Polynomial::new(vec![F::ZERO; size]);
-    izip!(0.., polys).for_each(|(idx, poly)| {
-        izip!(combined[idx..].iter_mut().step_by(t), &poly[..]).for_each(|(lhs, rhs)| *lhs = *rhs)
-    });
-    combined
+    let combined = (0..size)
+        .into_par_iter()
+        .map(|idx| {
+            polys
+                .get(idx % t)
+                .and_then(|poly| poly.get(idx / t))
+                .copied()
+                .unwrap_or(F::ZERO)
+        })
+        .collect();
+    Polynomial::new(combined)
 }
 
 fn eval_combined_polynomial<F: Field>(t: usize, num_evals: usize, poly: &[F], point: F) -> Vec<F> {
@@ -233,177 +317,4 @@ fn eval_combined_polynomial<F: Field>(t: usize, num_evals: usize, poly: &[F], po
             acc
         })
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod test {
-    use crate::backend::fflonk::{
-        circuit::FflonkCircuit,
-        keygen::{keygen_pk, keygen_vk},
-        prover::create_proof,
-        verifier::verify_proof,
-    };
-    use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner, Value},
-        halo2curves::{
-            bn256::{Bn256, Fr},
-            ff::Field,
-        },
-        plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed},
-        poly::{
-            kzg::{
-                commitment::{KZGCommitmentScheme, ParamsKZG},
-                multiopen::{ProverSHPLONK, VerifierSHPLONK},
-                strategy::SingleStrategy,
-            },
-            Rotation,
-        },
-        transcript::{
-            Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-        },
-    };
-    use rand_chacha::ChaCha20Rng;
-    use rand_core::SeedableRng;
-
-    #[test]
-    fn vanilla_plonk_with_lookup() {
-        #[derive(Clone, Debug)]
-        pub struct SampleConfig {
-            selectors: [Column<Fixed>; 7],
-            wires: [Column<Advice>; 4],
-        }
-
-        impl SampleConfig {
-            fn configure<F: Field>(meta: &mut ConstraintSystem<F>) -> Self {
-                let pi = meta.instance_column();
-                let [q_l, q_r, q_m, q_o, q_c, q_lookup, t] = [(); 7].map(|_| meta.fixed_column());
-                let [w_l, w_r, w_o, w_lookup] = [(); 4].map(|_| meta.advice_column());
-                [w_l, w_r, w_o, w_lookup].map(|column| meta.enable_equality(column));
-                meta.create_gate(
-                    "q_l·w_l + q_r·w_r + q_m·w_l·w_r + q_o·w_o + q_c + pi = 0",
-                    |meta| {
-                        let [q_l, q_r, q_o, q_m, q_c] = [q_l, q_r, q_o, q_m, q_c]
-                            .map(|column| meta.query_fixed(column, Rotation::cur()));
-                        let [w_l, w_r, w_o] = [w_l, w_r, w_o]
-                            .map(|column| meta.query_advice(column, Rotation::cur()));
-                        let pi = meta.query_instance(pi, Rotation::cur());
-                        Some(
-                            q_l * w_l.clone()
-                                + q_r * w_r.clone()
-                                + q_m * w_l * w_r
-                                + q_o * w_o
-                                + q_c
-                                + pi,
-                        )
-                    },
-                );
-                meta.lookup_any("(q_lookup * w_lookup) in (t)", |meta| {
-                    let [q_lookup, t] =
-                        [q_lookup, t].map(|column| meta.query_fixed(column, Rotation::cur()));
-                    let w_lookup = meta.query_advice(w_lookup, Rotation::cur());
-                    vec![(q_lookup * w_lookup, t)]
-                });
-                SampleConfig {
-                    selectors: [q_l, q_r, q_m, q_o, q_c, q_lookup, t],
-                    wires: [w_l, w_r, w_o, w_lookup],
-                }
-            }
-        }
-
-        #[derive(Clone, Debug, Default)]
-        pub struct Sample<F>(Vec<F>);
-
-        impl<F: Field> Circuit<F> for Sample<F> {
-            type Config = SampleConfig;
-            type FloorPlanner = SimpleFloorPlanner;
-            #[cfg(feature = "circuit-params")]
-            type Params = ();
-
-            fn without_witnesses(&self) -> Self {
-                unimplemented!()
-            }
-
-            fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                meta.set_minimum_degree(6);
-                SampleConfig::configure(meta)
-            }
-
-            fn synthesize(
-                &self,
-                config: Self::Config,
-                mut layouter: impl Layouter<F>,
-            ) -> Result<(), Error> {
-                layouter.assign_region(
-                    || "",
-                    |mut region| {
-                        let one = Value::known(F::ONE);
-                        for (row, value) in self.0.iter().enumerate() {
-                            let minus_value = Value::known(-*value);
-                            region.assign_fixed(|| "", config.selectors[0], row, || one)?;
-                            region.assign_advice(|| "", config.wires[0], row, || minus_value)?;
-                        }
-                        let offset = self.0.len();
-                        let minus_four = Value::known(-F::ONE.double().double());
-                        for selector in &config.selectors {
-                            region.assign_fixed(|| "", *selector, offset, || one)?;
-                        }
-                        let a = region.assign_advice(|| "", config.wires[0], offset, || one)?;
-                        let b = region.assign_advice(|| "", config.wires[1], offset, || one)?;
-                        let c = region.assign_advice(|| "", config.wires[2], offset + 1, || one)?;
-                        let d = region.assign_advice(|| "", config.wires[3], offset, || one)?;
-                        region.constrain_equal(a.cell(), b.cell())?;
-                        region.constrain_equal(b.cell(), c.cell())?;
-                        region.constrain_equal(c.cell(), d.cell())?;
-                        region.assign_advice(|| "", config.wires[2], offset, || minus_four)?;
-                        Ok(())
-                    },
-                )
-            }
-        }
-
-        let mut rng = ChaCha20Rng::seed_from_u64(0);
-        let instances = vec![Fr::random(&mut rng), Fr::random(&mut rng)];
-        let circuit = FflonkCircuit::new(4, Sample(instances.clone()));
-
-        let params = ParamsKZG::<Bn256>::setup(circuit.min_params_k() as u32, &mut rng);
-        let pk = keygen_pk::<KZGCommitmentScheme<_>, _>(&params, &circuit).unwrap();
-        let vk = keygen_vk::<KZGCommitmentScheme<_>, _>(&params, &circuit).unwrap();
-        assert_eq!(pk.vk.transcript_repr, vk.transcript_repr);
-
-        let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof::<KZGCommitmentScheme<_>, ProverSHPLONK<_>, _, _>(
-            &params,
-            &pk,
-            &circuit,
-            &[&instances],
-            &mut rng,
-            &mut transcript,
-        )
-        .unwrap();
-        let proof = transcript.finalize();
-
-        let mut transcript = Blake2bRead::init(proof.as_slice());
-        verify_proof::<KZGCommitmentScheme<_>, VerifierSHPLONK<_>, _, _>(
-            &params,
-            &vk,
-            &[&instances],
-            SingleStrategy::new(&params),
-            &mut transcript,
-        )
-        .unwrap();
-
-        assert_eq!(proof.len(), {
-            let num_commitments = vk.phase_infos.len() + 2;
-            let num_evals = vk.preprocessed_query_info.rotations.len()
-                * vk.preprocessed_query_info.num_polys
-                + vk.phase_infos
-                    .iter()
-                    .map(|phase_info| {
-                        phase_info.rotations.len() * phase_info.num_polys
-                            - phase_info.constraints.len()
-                    })
-                    .sum::<usize>();
-            num_commitments * 32 + num_evals * 32
-        });
-    }
 }

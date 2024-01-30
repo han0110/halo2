@@ -8,18 +8,39 @@ use std::{
     ops::{Add, Mul, Neg, Sub},
 };
 
+/// Query to a opaque polynomial.
 #[derive(Clone, Copy, Debug, Eq)]
 pub struct Query {
-    pub index: usize,
-    pub rotation: Rotation,
+    pub(crate) index: usize,
+    pub(crate) rotation: Rotation,
+}
+
+impl Query {
+    /// Returns `Query`.
+    pub fn new(index: usize, rotation: Rotation) -> Self {
+        Self { index, rotation }
+    }
+
+    /// Returns index of opaque polynomial.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Returns rotation of query.
+    pub fn rotation(&self) -> Rotation {
+        self.rotation
+    }
 }
 
 impl From<(usize, i32)> for Query {
     fn from((index, rotation): (usize, i32)) -> Self {
-        Self {
-            index,
-            rotation: Rotation(rotation),
-        }
+        Self::new(index, Rotation(rotation))
+    }
+}
+
+impl From<(usize, Rotation)> for Query {
+    fn from((index, rotation): (usize, Rotation)) -> Self {
+        Self::new(index, rotation)
     }
 }
 
@@ -48,20 +69,29 @@ impl Hash for Query {
     }
 }
 
+/// `PolynomialRef` represents different kinds of polynomials that might be used in a Plonkish
+/// proof system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PolynomialRef<F> {
-    Constant(F),      // f(X) = c
-    Challenge(usize), // f(X) = challenges[idx]
-    Identity,         // f(X) = X
-    Lagrange(i32),    // f(X) = 1 when X == omega^i otherwise 0 for X in omega^(0..n)
-    Opaque(Query),    // f(X)
+    /// `f(X) = c`
+    Constant(F),
+    /// `f(X) = challenges[idx]`
+    Challenge(usize),
+    /// `f(X) = X`
+    Identity,
+    /// `f(X) = 1 if X == omega^i else 0 for X in omega^(0..n)`
+    Lagrange(i32),
+    /// `f(X)` without specific structure
+    Opaque(Query),
 }
 
 impl<F> PolynomialRef<F> {
+    /// Returns `PolynomialRef::Opaque(query)`.
     pub fn opaque(query: impl Into<Query>) -> Self {
         Self::Opaque(query.into())
     }
 
+    /// Returns degree of the referenced polynomial.
     pub fn degree(&self) -> usize {
         match self {
             Self::Constant(_) | Self::Challenge(_) => 0,
@@ -69,6 +99,7 @@ impl<F> PolynomialRef<F> {
         }
     }
 
+    /// Evaluate `PolynomialRef` using the provided closures to perform the operations.
     pub fn evaluate<T>(
         &self,
         constant: &impl Fn(F) -> T,
@@ -90,11 +121,16 @@ impl<F> PolynomialRef<F> {
     }
 }
 
+/// Arithmetic expression of `PolynomialRef`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expression<F> {
+    /// It holds a `PolynomialRef`.
     Polynomial(PolynomialRef<F>),
+    /// Negated `Expression`.
     Neg(Box<Self>),
+    /// Sum of two `Expression`.
     Sum(Box<Self>, Box<Self>),
+    /// Product of two `Expression`.
     Product(Box<Self>, Box<Self>),
 }
 
@@ -105,6 +141,7 @@ impl<F> From<PolynomialRef<F>> for Expression<F> {
 }
 
 impl<F> Expression<F> {
+    /// Returns degree of the `Expression`.
     pub fn degree(&self) -> usize {
         match self {
             Self::Polynomial(inner) => inner.degree(),
@@ -116,6 +153,7 @@ impl<F> Expression<F> {
 }
 
 impl<F: Clone> Expression<F> {
+    /// Evaluate `Expression` using the provided closures to perform the operations.
     pub fn evaluate<T>(
         &self,
         poly: &impl Fn(PolynomialRef<F>) -> T,
@@ -132,6 +170,7 @@ impl<F: Clone> Expression<F> {
         }
     }
 
+    /// Evaluate `Expression` using the provided closures which return field element.
     pub fn evaluate_felt(&self, poly: &impl Fn(PolynomialRef<F>) -> F) -> F
     where
         F: Field,
@@ -139,9 +178,10 @@ impl<F: Clone> Expression<F> {
         self.evaluate(poly, &|a| -a, &|a, b| a + b, &|a, b| a * b)
     }
 
-    pub fn used_term<T>(&self, poly: &impl Fn(PolynomialRef<F>) -> Option<T>) -> BTreeSet<T>
+    fn used_poly<T, I>(&self, poly: &impl Fn(PolynomialRef<F>) -> I) -> BTreeSet<T>
     where
         T: Clone + Ord,
+        I: IntoIterator<Item = T>,
     {
         self.evaluate(
             &|a| BTreeSet::from_iter(poly(a)),
@@ -151,22 +191,25 @@ impl<F: Clone> Expression<F> {
         )
     }
 
+    /// Returns used `PolynomialRef::Lagrange` of the `Expression`.
     pub fn used_langrange(&self) -> BTreeSet<i32> {
-        self.used_term(&|poly| match poly {
+        self.used_poly(&|poly| match poly {
             PolynomialRef::Lagrange(i) => i.into(),
             _ => None,
         })
     }
 
+    /// Returns used `Query` of the `Expression`.
     pub fn used_query(&self) -> BTreeSet<Query> {
-        self.used_term(&|poly| match poly {
+        self.used_poly(&|poly| match poly {
             PolynomialRef::Opaque(query) => query.into(),
             _ => None,
         })
     }
 
+    /// Returns used `PolynomialRef::Challenge` of the `Expression`.
     pub fn used_challenge(&self) -> BTreeSet<usize> {
-        self.used_term(&|poly| match poly {
+        self.used_poly(&|poly| match poly {
             PolynomialRef::Challenge(idx) => idx.into(),
             _ => None,
         })

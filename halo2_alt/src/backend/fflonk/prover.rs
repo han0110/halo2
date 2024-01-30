@@ -21,6 +21,7 @@ use halo2_proofs::{
 use rand_core::RngCore;
 use std::iter;
 
+/// Create a fflonk proof.
 pub fn create_proof<'params, S, P, E, C>(
     params: &'params S::ParamsProver,
     pk: &ProvingKey<S::Curve>,
@@ -38,7 +39,7 @@ where
 {
     let vk = &pk.vk;
     let domain = &vk.domain;
-    if instances.len() != vk.protocol.num_instance_polys {
+    if instances.len() != vk.protocol.num_instance_polys() {
         return Err(Error::InvalidInstances);
     }
 
@@ -70,7 +71,7 @@ where
     let mut challenges = vec![];
     let mut buf = C::WitnessBuf::default();
     for (phase, (num_advice_polys, num_challegnes), phase_info, evaluators) in
-        izip!(0.., &vk.protocol.phases, &vk.phase_infos, &pk.evaluators)
+        izip!(0.., vk.protocol.phases(), &vk.phase_infos, &pk.evaluators)
     {
         let values = {
             let values = chain![&pk.preprocessed_values, &instance_values, &advice_values]
@@ -155,12 +156,12 @@ where
 
     // NOTE: Because `Polynomial` assumes all values have same length, we need to pad here.
     let combineds = {
-        let max_size = combineds.iter().map(|(poly, _)| poly.len()).max().unwrap();
+        let size = vk.max_combined_poly_size();
         combineds
             .into_iter()
             .map(|(poly, blind)| {
                 let mut poly = poly.into_vec();
-                poly.resize(max_size, S::Scalar::ZERO);
+                poly.resize(size, S::Scalar::ZERO);
                 (Polynomial::new(poly), blind)
             })
             .collect::<Vec<_>>()

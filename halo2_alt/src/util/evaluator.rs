@@ -201,7 +201,7 @@ impl<F: Field> ExpressionRegistry<F> {
 
     fn register_expression(&mut self, expr: &Expression<F>) -> ValueSource {
         match expr {
-            Expression::Polynomial(term) => match term {
+            Expression::Polynomial(poly) => match poly {
                 PolynomialRef::Constant(constant) => self.register_constant(constant),
                 PolynomialRef::Challenge(idx) => self.register_challenge(idx),
                 PolynomialRef::Identity => self.register_identity(),

@@ -14,7 +14,7 @@ use halo2_proofs::{
     plonk::Error,
     poly::{
         commitment::{Blind, CommitmentScheme, ParamsProver},
-        EvaluationDomain, ExtendedLagrangeCoeff, Polynomial,
+        ExtendedLagrangeCoeff, Polynomial,
     },
 };
 use rayon::prelude::*;
@@ -25,6 +25,7 @@ use std::{
     iter,
 };
 
+/// Generate fflonk verifying key.
 pub fn keygen_vk<S: CommitmentScheme, C>(
     params: &S::ParamsProver,
     circuit: &C,
@@ -34,14 +35,13 @@ where
     C: Circuit<S::Scalar>,
 {
     let protocol = circuit.protocol();
-    protocol.assert_valid();
 
     let (preprocessed_query_info, phase_infos) = query_infos(&protocol);
 
     let preprocessed_commitment = {
-        let domain = EvaluationDomain::new(protocol.degree() as u32, protocol.k as u32);
+        let domain = protocol.domain();
         let preprocessed_values = circuit.preprocess()?;
-        if preprocessed_values.len() != protocol.num_preprocessed_polys {
+        if preprocessed_values.len() != protocol.num_preprocessed_polys() {
             return Err(Error::Synthesis);
         }
 
@@ -61,6 +61,7 @@ where
     ))
 }
 
+/// Generate fflonk proving key.
 pub fn keygen_pk<S: CommitmentScheme, C>(
     params: &S::ParamsProver,
     circuit: &C,
@@ -70,14 +71,13 @@ where
     C: Circuit<S::Scalar>,
 {
     let protocol = circuit.protocol();
-    protocol.assert_valid();
 
     let (preprocessed_query_info, phase_infos) = query_infos(&protocol);
 
-    let domain = EvaluationDomain::new(protocol.degree() as u32, protocol.k as u32);
+    let domain = protocol.domain();
 
     let preprocessed_values = circuit.preprocess()?;
-    assert_eq!(preprocessed_values.len(), protocol.num_preprocessed_polys);
+    assert_eq!(preprocessed_values.len(), protocol.num_preprocessed_polys());
 
     let preprocessed_polys = preprocessed_values
         .iter()
@@ -122,7 +122,7 @@ pub(super) fn query_infos<F: PrimeField>(
     .flat_map(|(range, phase)| izip!(range, iter::repeat(phase)))
     .collect::<HashMap<_, Option<usize>>>();
     let rotations = protocol
-        .constraints
+        .constraints()
         .iter()
         .flat_map(Expression::used_query)
         .fold(
@@ -139,12 +139,12 @@ pub(super) fn query_infos<F: PrimeField>(
             },
         );
     let num_polys = chain![
-        [protocol.num_preprocessed_polys],
-        izip!(&protocol.phases, &constraints_by_earliest_phase)
+        [protocol.num_preprocessed_polys()],
+        izip!(protocol.phases(), &constraints_by_earliest_phase)
             .map(|((num_advice_polys, _), constraints)| *num_advice_polys + constraints.len()),
     ];
     let mut query_infos = izip!(num_polys, rotations)
-        .map(|(num_polys, rotations)| QueryInfo::new(protocol.k, num_polys, rotations))
+        .map(|(num_polys, rotations)| QueryInfo::new(protocol.k(), num_polys, rotations))
         .collect::<Vec<_>>()
         .into_iter();
     let preprocessed_query_info = query_infos.next().unwrap();
@@ -166,7 +166,7 @@ fn constraints_by_earliest_phase<F: Field>(protocol: &Protocol<F>) -> Vec<Vec<us
     let challenge_usable_phase = izip!(poly_ranges.challenges, 1..)
         .flat_map(|(range, phase)| izip!(range, iter::repeat(phase)))
         .collect::<HashMap<_, usize>>();
-    protocol.constraints.iter().enumerate().fold(
+    protocol.constraints().iter().enumerate().fold(
         vec![vec![]; protocol.num_phases()],
         |mut constraints_by_earliest_phase, (idx, constraint)| {
             let phase = constraint.evaluate(
@@ -232,14 +232,14 @@ fn evaluators<F: WithSmallOrderMulGroup<3> + Hash>(
             phase_info
                 .constraints
                 .iter()
-                .map(|idx| Evaluator::new(protocol.k, &replace(&protocol.constraints[*idx])))
+                .map(|idx| Evaluator::new(protocol.k(), &replace(&protocol.constraints()[*idx])))
                 .collect()
         })
         .collect();
 
     let transparent_cosets = {
-        let domain = EvaluationDomain::new(protocol.degree() as u32, protocol.k as u32);
-        let n = 1 << protocol.k;
+        let domain = protocol.domain();
+        let n = protocol.n() as i32;
 
         let mut transparents = transparents.take().into_iter().collect::<Vec<_>>();
         transparents.sort_by(|(_, a), (_, b)| a.cmp(b));
