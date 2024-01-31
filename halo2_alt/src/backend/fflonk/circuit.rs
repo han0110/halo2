@@ -57,6 +57,9 @@ where
     /// Wraps `halo2_proofs::plonk::Circuit` to fit `crate::backend::Circuit` abstraction.
     pub fn new(k: usize, circuit: C) -> Self {
         let mut cs = ConstraintSystem::default();
+        #[cfg(feature = "circuit-params")]
+        let circuit_config = C::configure_with_params(&mut cs, circuit.params());
+        #[cfg(not(feature = "circuit-params"))]
         let circuit_config = C::configure(&mut cs);
         let cs = cs;
 
